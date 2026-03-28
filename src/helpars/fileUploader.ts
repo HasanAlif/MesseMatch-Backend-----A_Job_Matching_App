@@ -141,6 +141,24 @@ const uploadGeneralFile = async (file: Express.Multer.File) => {
   return uploadToCloudinary(file, "user-files");
 };
 
+// Delete file from Cloudinary
+const deleteFromCloudinary = async (publicId: string): Promise<boolean> => {
+  if (!publicId) {
+    return false;
+  }
+
+  try {
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: "image",
+      invalidate: true,
+    });
+    return result.result === "ok";
+  } catch (error) {
+    console.error("Error deleting file from Cloudinary:", error);
+    return false;
+  }
+};
+
 // ✅ No Name Changes, Just Fixes
 export const fileUploader = {
   upload,
@@ -154,4 +172,5 @@ export const fileUploader = {
   uploadToCloudinary,
   uploadProfileImage,
   uploadGeneralFile,
+  deleteFromCloudinary,
 };
