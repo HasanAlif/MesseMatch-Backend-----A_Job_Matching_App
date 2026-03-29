@@ -22,6 +22,26 @@ export enum Plan {
   PREMIUM = "PREMIUM",
 }
 
+export enum DevicePlatform {
+  IOS = "ios",
+  ANDROID = "android",
+  WEB = "web",
+}
+
+export interface IFcmTokenEntry {
+  deviceId: string;
+  token: string;
+  platform: DevicePlatform;
+  deviceName?: string;
+  lastActiveAt: Date;
+  createdAt: Date;
+}
+
+export const FCM_TOKEN_CONFIG = {
+  MAX_DEVICES_PER_USER: 10,
+  STALE_TOKEN_DAYS: 30,
+};
+
 export interface IUser extends Document {
   _id: string;
   fullName: string;
@@ -61,6 +81,7 @@ export interface IUser extends Document {
   plan?: Plan;
   lattitude?: number;
   longitude?: number;
+  fcmTokens: IFcmTokenEntry[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -209,6 +230,20 @@ const UserSchema = new Schema<IUser>(
     longitude: {
       type: Number,
     },
+    fcmTokens: [
+      {
+        deviceId: { type: String, required: true },
+        token: { type: String, required: true },
+        platform: {
+          type: String,
+          enum: Object.values(DevicePlatform),
+          required: true,
+        },
+        deviceName: { type: String },
+        lastActiveAt: { type: Date, default: Date.now },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,
@@ -220,5 +255,7 @@ UserSchema.index({ role: 1 });
 UserSchema.index({ status: 1 });
 UserSchema.index({ mobileNumber: 1 });
 UserSchema.index({ googleId: 1 });
+UserSchema.index({ "fcmTokens.deviceId": 1 });
+UserSchema.index({ "fcmTokens.token": 1 });
 
 export const User = mongoose.model<IUser>("User", UserSchema);

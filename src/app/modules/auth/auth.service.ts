@@ -7,7 +7,8 @@ import ApiError from "../../../errors/ApiErrors";
 import { jwtHelpers } from "../../../helpars/jwtHelpers";
 import emailSender from "../../../shared/emailSender";
 import { PASSWORD_RESET_TEMPLATE } from "../../../utils/Template";
-import { AuthProvider, User } from "../../models";
+import { AuthProvider, User, DevicePlatform } from "../../models";
+import { notificationService } from "../notification/notification.service";
 
 // Initialize Google OAuth client
 const googleClient = new OAuth2Client(
@@ -21,6 +22,9 @@ const loginUser = async (payload: {
   email: string;
   password: string;
   fcmToken?: string;
+  deviceId?: string;
+  platform?: DevicePlatform;
+  deviceName?: string;
 }) => {
   const userData = await User.findOne({ email: payload.email })
     .select("+password")
@@ -61,9 +65,15 @@ const loginUser = async (payload: {
     throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid email or password");
   }
 
-  // Update FCM token if provided
-  if (payload.fcmToken) {
-    await User.findByIdAndUpdate(userData._id, { fcmToken: payload.fcmToken });
+  // Update FCM token if provided with device info
+  if (payload.fcmToken && payload.deviceId && payload.platform) {
+    await notificationService.registerFcmToken({
+      userId: userData._id.toString(),
+      deviceId: payload.deviceId,
+      fcmToken: payload.fcmToken,
+      platform: payload.platform,
+      deviceName: payload.deviceName,
+    });
   }
 
   const accessToken = jwtHelpers.generateToken(

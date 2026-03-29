@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+const loginValidationSchema = z.object({
+  email: z.string().email("Please provide a valid email"),
+  password: z.string().min(1, "Password is required"),
+  fcmToken: z.string().max(500).optional(),
+  deviceId: z.string().max(100).optional(),
+  platform: z.enum(["ios", "android", "web"]).optional(),
+  deviceName: z.string().max(100).optional(),
+});
+
 const changePasswordValidationSchema = z.object({
   oldPassword: z.string().min(1, "Current password is required"),
   newPassword: z.string().min(8, "New password must be at least 8 characters"),
@@ -31,6 +40,7 @@ const resendOtpSchema = z.object({
 });
 
 export const authValidation = {
+  loginValidationSchema,
   changePasswordValidationSchema,
   forgotPasswordSchema,
   verifyOtpSchema,

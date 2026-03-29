@@ -2,6 +2,7 @@ import { Server } from "http";
 import config from "./config";
 import "./shared/database";
 import app from "./app";
+import { initializeFirebase } from "./shared/firebase";
 
 let server: Server;
 
@@ -12,6 +13,13 @@ async function startServer() {
 }
 
 async function main() {
+  // Initialize Firebase (optional - app works without it)
+  try {
+    initializeFirebase();
+  } catch (error) {
+    console.warn("Firebase initialization skipped:", (error as Error).message);
+  }
+
   await startServer();
   const exitHandler = () => {
     if (server) {
