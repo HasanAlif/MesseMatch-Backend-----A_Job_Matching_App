@@ -7,13 +7,7 @@ import { userService } from "./user.service";
 
 // Register new user - sends OTP
 const createUser = catchAsync(async (req: Request, res: Response) => {
-  const { fullName, email, mobileNumber, password } = req.body;
-  const result = await userService.createUserIntoDb({
-    fullName,
-    email,
-    mobileNumber,
-    password,
-  });
+  const result = await userService.createUserIntoDb(req.body);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -26,8 +20,7 @@ const createUser = catchAsync(async (req: Request, res: Response) => {
 // Verify registration OTP
 const verifyRegistrationOtp = catchAsync(
   async (req: Request, res: Response) => {
-    const { email, otp } = req.body;
-    const result = await userService.verifyRegistrationOtp({ email, otp });
+    const result = await userService.verifyRegistrationOtp(req.body);
 
     // Set token in cookie after successful verification
     res.cookie("token", result.token, {
@@ -38,11 +31,24 @@ const verifyRegistrationOtp = catchAsync(
       path: "/",
     });
 
+    // Prepare response data
+    const responseData: any = {
+      user: result.user,
+      token: result.token,
+    };
+
+    // Include device error if present (non-blocking)
+    if (result.deviceRegistrationError) {
+      responseData.deviceError = result.deviceRegistrationError;
+    }
+
     sendResponse(res, {
       statusCode: httpStatus.CREATED,
       success: true,
-      message: "Email verified and registration completed successfully!",
-      data: result,
+      message: result.deviceRegistrationError
+        ? "Email verified but device registration failed"
+        : "Email verified and registration completed successfully!",
+      data: responseData,
     });
   },
 );
@@ -87,7 +93,9 @@ const completeProfileAsFitter = catchAsync(
 const completeProfileAsCompany = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const userId = req.user?.id as string;
-    const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const files = req.files as
+      | Record<string, Express.Multer.File[]>
+      | undefined;
 
     const result = await userService.completeProfileAsCompany(
       userId,
