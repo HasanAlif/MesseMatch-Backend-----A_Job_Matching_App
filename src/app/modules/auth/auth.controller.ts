@@ -17,27 +17,53 @@ const loginUser = catchAsync(async (req: Request, res: Response) => {
     path: "/",
   });
 
+  // Prepare response data
+  const responseData: any = {
+    token: result.token,
+    user: result.user,
+  };
+
+  // Include device error if present (non-blocking)
+  if (result.deviceRegistrationError) {
+    responseData.deviceError = result.deviceRegistrationError;
+  }
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Login successful",
-    data: result,
+    message: result.deviceRegistrationError
+      ? "Login successful but device registration failed"
+      : "Login successful",
+    data: responseData,
   });
 });
 
 // Logout
 const logoutUser = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.id; // From @Auth() middleware
+  const { deviceId } = req.body;
+
+  // Clear authentication cookie
   res.clearCookie("token", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
   });
 
+  // Remove device if userId and deviceId provided
+  let responseData: any = null;
+  if (userId && deviceId) {
+    const result = await authService.logoutUser(userId, deviceId);
+    if (result.deviceRemovalError) {
+      responseData = { deviceError: result.deviceRemovalError };
+    }
+  }
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Logout successful",
-    data: null,
+    data: responseData,
   });
 });
 

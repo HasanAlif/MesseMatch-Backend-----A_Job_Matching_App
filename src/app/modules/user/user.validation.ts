@@ -1,15 +1,62 @@
 import { z } from "zod";
 
 // Registration validation - simple: fullName, mobileNumber, email, password
-const CreateUserValidationSchema = z.object({
-  fullName: z
-    .string()
-    .min(2, "Full name must be at least 2 characters")
-    .max(100),
-  email: z.string().email("Please provide a valid email"),
-  mobileNumber: z.string().min(10, "Mobile number must be at least 10 digits"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-});
+// With optional device info (all-or-nothing pattern)
+const CreateUserValidationSchema = z
+  .object({
+    fullName: z
+      .string()
+      .min(2, "Full name must be at least 2 characters")
+      .max(100),
+    email: z.string().email("Please provide a valid email"),
+    mobileNumber: z
+      .string()
+      .min(10, "Mobile number must be at least 10 digits"),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    // Optional device fields
+    fcmToken: z
+      .string()
+      .max(500, "FCM token must not exceed 500 characters")
+      .regex(/^[a-zA-Z0-9_-]+$/, "FCM token contains invalid characters")
+      .optional(),
+    deviceId: z
+      .string()
+      .min(4, "Device ID must be at least 4 characters")
+      .max(256, "Device ID must not exceed 256 characters")
+      .regex(
+        /^[a-zA-Z0-9._:-]+$/,
+        "Device ID contains invalid characters (supports UUIDs, platform IDs)",
+      )
+      .optional(),
+    platform: z
+      .enum(["ios", "android", "web"], {
+        errorMap: () => ({
+          message: 'Platform must be "ios", "android", or "web"',
+        }),
+      })
+      .optional(),
+    deviceName: z
+      .string()
+      .min(1, "Device name must not be empty")
+      .max(100, "Device name must not exceed 100 characters")
+      .regex(
+        /^[a-zA-Z0-9\s\-._()&]+$/,
+        "Device name contains invalid characters",
+      )
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      const { deviceId, fcmToken, platform } = data;
+      const hasAny = deviceId || fcmToken || platform;
+      const hasAll = deviceId && fcmToken && platform;
+      return !hasAny || hasAll;
+    },
+    {
+      message:
+        "If providing device info, deviceId, fcmToken, and platform are all required",
+    },
+  );
 
 // Login validation
 const UserLoginValidationSchema = z.object({
@@ -23,11 +70,55 @@ const UpdateProfileSchema = z.object({
   mobileNumber: z.string().min(10).optional(),
 });
 
-// Verify registration OTP
-const VerifyRegistrationOtpSchema = z.object({
-  email: z.string().email("Please provide a valid email"),
-  otp: z.string().length(6, "OTP must be 6 digits"),
-});
+// Verify registration OTP with optional device info
+const VerifyRegistrationOtpSchema = z
+  .object({
+    email: z.string().email("Please provide a valid email"),
+    otp: z.string().length(6, "OTP must be 6 digits"),
+    // Optional device fields
+    fcmToken: z
+      .string()
+      .max(500, "FCM token must not exceed 500 characters")
+      .regex(/^[a-zA-Z0-9_-]+$/, "FCM token contains invalid characters")
+      .optional(),
+    deviceId: z
+      .string()
+      .min(4, "Device ID must be at least 4 characters")
+      .max(256, "Device ID must not exceed 256 characters")
+      .regex(
+        /^[a-zA-Z0-9._:-]+$/,
+        "Device ID contains invalid characters (supports UUIDs, platform IDs)",
+      )
+      .optional(),
+    platform: z
+      .enum(["ios", "android", "web"], {
+        errorMap: () => ({
+          message: 'Platform must be "ios", "android", or "web"',
+        }),
+      })
+      .optional(),
+    deviceName: z
+      .string()
+      .min(1, "Device name must not be empty")
+      .max(100, "Device name must not exceed 100 characters")
+      .regex(
+        /^[a-zA-Z0-9\s\-._()&]+$/,
+        "Device name contains invalid characters",
+      )
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      const { deviceId, fcmToken, platform } = data;
+      const hasAny = deviceId || fcmToken || platform;
+      const hasAll = deviceId && fcmToken && platform;
+      return !hasAny || hasAll;
+    },
+    {
+      message:
+        "If providing device info, deviceId, fcmToken, and platform are all required",
+    },
+  );
 
 // Resend registration OTP
 const ResendRegistrationOtpSchema = z.object({
@@ -73,7 +164,10 @@ const CompleteProfileAsFitterSchema = z.object({
 // Complete profile as Company
 const CompleteProfileAsCompanySchema = z.object({
   companyName: z.string().min(2).max(150).optional(),
-  businessEmail: z.string().email("Please provide a valid business email").optional(),
+  businessEmail: z
+    .string()
+    .email("Please provide a valid business email")
+    .optional(),
   contactPersonName: z.string().min(2).max(100).optional(),
   postalCode: z.string().min(3).max(20).optional(),
   lattitude: z.coerce.number().min(-90).max(90).optional(),

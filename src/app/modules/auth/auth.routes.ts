@@ -14,7 +14,12 @@ router.post(
 );
 
 // Logout
-router.post("/logout", AuthController.logoutUser);
+router.post(
+  "/logout",
+  auth(),
+  validateRequest(authValidation.logoutValidationSchema),
+  AuthController.logoutUser,
+);
 
 // Get my profile
 router.get("/me", auth(), AuthController.getMyProfile);

@@ -7,6 +7,7 @@ import ApiError from "../../../errors/ApiErrors";
 import { jwtHelpers } from "../../../helpars/jwtHelpers";
 import emailSender from "../../../shared/emailSender";
 import { PASSWORD_RESET_TEMPLATE } from "../../../utils/Template";
+import { generateDeviceUUID } from "../../../utils/generateDeviceUUID";
 import { AuthProvider, User, DevicePlatform } from "../../models";
 import { notificationService } from "../notification/notification.service";
 
@@ -65,15 +66,29 @@ const loginUser = async (payload: {
     throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid email or password");
   }
 
-  // Update FCM token if provided with device info
+  // BULLETPROOF: Device registration with error isolation
+  let deviceRegistrationError: string | null = null;
   if (payload.fcmToken && payload.deviceId && payload.platform) {
-    await notificationService.registerFcmToken({
-      userId: userData._id.toString(),
-      deviceId: payload.deviceId,
-      fcmToken: payload.fcmToken,
-      platform: payload.platform,
-      deviceName: payload.deviceName,
-    });
+    try {
+      // Convert deviceId string to deterministic UUID v5
+      const deviceUUID = generateDeviceUUID(payload.deviceId.trim());
+
+      await notificationService.registerFcmToken({
+        userId: userData._id.toString(),
+        deviceId: deviceUUID,
+        fcmToken: payload.fcmToken.trim(),
+        platform: payload.platform,
+        deviceName: payload.deviceName?.trim(),
+      });
+    } catch (error) {
+      // Log warning but don't fail login - track error for response
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.warn(
+        `[AUTH] Device registration failed for user ${userData._id} at login: ${errorMsg}`,
+      );
+      deviceRegistrationError = `Device registration failed: ${errorMsg}`;
+      // Continue with login - authentication succeeded
+    }
   }
 
   const accessToken = jwtHelpers.generateToken(
@@ -93,10 +108,42 @@ const loginUser = async (payload: {
     ...userWithoutSensitive
   } = userData;
 
-  return { token: accessToken, user: userWithoutSensitive };
+  return {
+    token: accessToken,
+    user: userWithoutSensitive,
+    deviceRegistrationError, // Include in response if error occurred
+  };
 };
 
-// Get user profile
+// Logout user - clear auth and optionally remove device
+const logoutUser = async (userId: string, deviceId?: string) => {
+  let deviceRemovalError: string | null = null;
+
+  if (deviceId) {
+    try {
+      // Convert deviceId string to deterministic UUID v5 (same as login)
+      const deviceUUID = generateDeviceUUID(deviceId.trim());
+
+      await notificationService.removeFcmToken({
+        userId,
+        deviceId: deviceUUID,
+      });
+    } catch (error) {
+      // Log error but don't fail logout - track error for response
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error(
+        `[AUTH] Device removal failed for user ${userId} at logout: ${errorMsg}`,
+      );
+      deviceRemovalError = `Device removal failed: ${errorMsg}`;
+      // Continue logout - authentication was already cleared
+    }
+  }
+
+  return {
+    message: "Logged out successfully",
+    deviceRemovalError, // Include in response if error occurred
+  };
+};
 const getMyProfile = async (userId: string) => {
   const userProfile = await User.findById(userId)
     .select(
@@ -373,6 +420,7 @@ const googleCallback = async (code: string) => {
 
 export const authService = {
   loginUser,
+  logoutUser,
   getMyProfile,
   changePassword,
   forgotPassword,

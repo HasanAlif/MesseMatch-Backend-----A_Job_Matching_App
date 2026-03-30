@@ -7,8 +7,10 @@ import ApiError from "../../../errors/ApiErrors";
 import { jwtHelpers } from "../../../helpars/jwtHelpers";
 import emailSender from "../../../shared/emailSender";
 import { EMAIL_VERIFICATION_TEMPLATE } from "../../../utils/Template";
+import { generateDeviceUUID } from "../../../utils/generateDeviceUUID";
 import { fileUploader } from "../../../helpars/fileUploader";
-import { UserRole } from "../../models/User.model";
+import { UserRole, DevicePlatform } from "../../models/User.model";
+import { notificationService } from "../notification/notification.service";
 
 // Create a new user - Registration with OTP verification
 const createUserIntoDb = async (payload: {
@@ -16,6 +18,10 @@ const createUserIntoDb = async (payload: {
   email: string;
   mobileNumber: string;
   password: string;
+  fcmToken?: string;
+  deviceId?: string;
+  platform?: DevicePlatform;
+  deviceName?: string;
 }) => {
   // Check if user already exists and is verified
   const existingUser = await User.findOne({ email: payload.email });
@@ -76,6 +82,37 @@ const createUserIntoDb = async (payload: {
     });
   }
 
+  if (!user) {
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Failed to create user",
+    );
+  }
+
+  // Try to pre-register device in phase 1 if provided (non-blocking)
+  let devicePreRegistered = false;
+  if (payload.fcmToken && payload.deviceId && payload.platform) {
+    try {
+      // Convert deviceId string to deterministic UUID v5
+      const deviceUUID = generateDeviceUUID(payload.deviceId.trim());
+
+      await notificationService.registerFcmToken({
+        userId: user._id.toString(),
+        deviceId: deviceUUID,
+        fcmToken: payload.fcmToken.trim(),
+        platform: payload.platform,
+        deviceName: payload.deviceName?.trim(),
+      });
+      devicePreRegistered = true;
+    } catch (error) {
+      // Log but don't fail registration - device can be registered in phase 2
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.warn(
+        `[USER] Device pre-registration failed for user ${user._id}: ${errorMsg}`,
+      );
+    }
+  }
+
   // Send verification OTP email
   await emailSender(
     payload.email,
@@ -87,6 +124,7 @@ const createUserIntoDb = async (payload: {
     message: "OTP sent to your email. Please verify to complete registration.",
     email: payload.email,
     otp,
+    ...(devicePreRegistered && { devicePreRegistered: true }),
   };
 };
 
@@ -94,6 +132,10 @@ const createUserIntoDb = async (payload: {
 const verifyRegistrationOtp = async (payload: {
   email: string;
   otp: string;
+  fcmToken?: string;
+  deviceId?: string;
+  platform?: DevicePlatform;
+  deviceName?: string;
 }) => {
   const user = await User.findOne({ email: payload.email }).select(
     "+verificationOtp +verificationOtpExpiry",
@@ -123,6 +165,31 @@ const verifyRegistrationOtp = async (payload: {
     verificationOtpExpiry: undefined,
   });
 
+  // Register device if provided in phase 2 (non-blocking)
+  let deviceRegistrationError: string | null = null;
+  if (payload.fcmToken && payload.deviceId && payload.platform) {
+    try {
+      // Convert deviceId string to deterministic UUID v5
+      const deviceUUID = generateDeviceUUID(payload.deviceId.trim());
+
+      await notificationService.registerFcmToken({
+        userId: user._id.toString(),
+        deviceId: deviceUUID,
+        fcmToken: payload.fcmToken.trim(),
+        platform: payload.platform,
+        deviceName: payload.deviceName?.trim(),
+      });
+    } catch (error) {
+      // Log warning but don't fail verification
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.warn(
+        `[USER] Device registration failed for user ${user._id} at verify-registration: ${errorMsg}`,
+      );
+      deviceRegistrationError = `Device registration failed: ${errorMsg}`;
+      // Continue with token generation - verification succeeded
+    }
+  }
+
   // Generate token
   const token = jwtHelpers.generateToken(
     {
@@ -144,6 +211,7 @@ const verifyRegistrationOtp = async (payload: {
       createdAt: user.createdAt,
     },
     token,
+    deviceRegistrationError, // Include in response if error occurred
   };
 };
 
