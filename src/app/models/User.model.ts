@@ -82,6 +82,8 @@ export interface IUser extends Document {
   lattitude?: number;
   longitude?: number;
   fcmTokens: IFcmTokenEntry[];
+  isOnline: boolean;
+  lastSeen?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -244,6 +246,13 @@ const UserSchema = new Schema<IUser>(
         createdAt: { type: Date, default: Date.now },
       },
     ],
+    isOnline: {
+      type: Boolean,
+      default: false,
+    },
+    lastSeen: {
+      type: Date,
+    },
   },
   {
     timestamps: true,

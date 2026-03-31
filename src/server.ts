@@ -1,15 +1,35 @@
-import { Server } from "http";
+import { Server as HttpServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
 import config from "./config";
 import "./shared/database";
-import app from "./app";
+import app, { corsOptions } from "./app";
 import { initializeFirebase } from "./shared/firebase";
+import { socketHandler } from "./socket/socketHandler";
 
-let server: Server;
+let server: HttpServer;
+let io: SocketIOServer;
 
 async function startServer() {
   server = app.listen(config.port, () => {
     console.log(`Server is running on port ${config.port}`);
   });
+
+  // Initialize Socket.IO
+  io = new SocketIOServer(server, {
+    cors: {
+      origin: corsOptions.origin,
+      methods: corsOptions.methods,
+      credentials: corsOptions.credentials,
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    transports: ["websocket", "polling"],
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB for image uploads
+  });
+
+  // Initialize socket handlers
+  socketHandler(io);
+  console.log("Socket.IO initialized");
 }
 
 async function main() {

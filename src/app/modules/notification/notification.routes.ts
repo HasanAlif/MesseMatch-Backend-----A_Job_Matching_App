@@ -7,50 +7,44 @@ import { UserRole } from "../../models";
 
 const router = express.Router();
 
+const roles = [UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY];
+
 // User endpoints - any authenticated user
 router.post(
   "/fcm-token",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
+  auth(...roles),
   validateRequest(notificationValidation.registerFcmTokenSchema),
   notificationController.registerFcmToken,
 );
 
 router.post(
   "/fcm-token/remove",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
+  auth(...roles),
   validateRequest(notificationValidation.removeFcmTokenSchema),
   notificationController.removeFcmToken,
 );
 
-router.get(
-  "/my-devices",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
-  notificationController.getMyDevices,
-);
+router.get("/my-devices", auth(...roles), notificationController.getMyDevices);
 
 router.get(
   "/my-notifications",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
+  auth(...roles),
   notificationController.getMyNotifications,
 );
 
 router.get(
   "/unread-count",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
+  auth(...roles),
   notificationController.getUnreadCount,
 );
 
 router.patch(
   "/mark-all-read",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
+  auth(...roles),
   notificationController.markAllAsRead,
 );
 
-router.patch(
-  "/:id/read",
-  auth(UserRole.ADMIN, UserRole.FITTER, UserRole.COMPANY),
-  notificationController.markAsRead,
-);
+router.patch("/:id/read", auth(...roles), notificationController.markAsRead);
 
 // Admin-only endpoints
 router.post(
