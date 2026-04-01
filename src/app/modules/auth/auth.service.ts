@@ -205,7 +205,7 @@ const forgotPassword = async (payload: { email: string }) => {
   }
 
   const otp = crypto.randomInt(100000, 999999).toString();
-  const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+  const otpExpiry = new Date(Date.now() + 60 * 1000); // 1 minute
 
   await User.findByIdAndUpdate(user._id, {
     resetPasswordOtp: otp,
@@ -233,7 +233,7 @@ const resendOtp = async (email: string) => {
   }
 
   const otp = crypto.randomInt(100000, 999999).toString();
-  const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+  const otpExpiry = new Date(Date.now() + 60 * 1000); // 1 minute
 
   await User.findByIdAndUpdate(user._id, {
     resetPasswordOtp: otp,

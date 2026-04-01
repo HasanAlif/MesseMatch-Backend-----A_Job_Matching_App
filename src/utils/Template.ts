@@ -432,7 +432,7 @@ export const PASSWORD_RESET_TEMPLATE = (otp: string) => `
             <h2>Reset Your Password</h2>
             <p>You requested a password reset for your ${config.site_name || "MesseMatch"} account. Use the OTP below to proceed:</p>
             <div class="otp-code">${otp}</div>
-            <p>This code expires in 5 minutes. If you did not request this, please ignore this email.</p>
+            <p>This code expires in 1 minute. If you did not request this, please ignore this email.</p>
         </div>
         <div class="footer">
             <p>&copy; ${new Date().getFullYear()} ${config.site_name || "MesseMatch"} — Smart Job Matching Platform</p>
@@ -469,7 +469,7 @@ export const EMAIL_VERIFICATION_TEMPLATE = (otp: string) => `
             <h2>Verify Your Email</h2>
             <p>Welcome to <strong>${config.site_name || "MesseMatch"}</strong>! Complete your registration by verifying your email. Use the OTP below:</p>
             <div class="otp-code">${otp}</div>
-            <p>This code expires in 5 minutes. If you did not create an account, please ignore this email.</p>
+            <p>This code expires in 1 minute. If you did not create an account, please ignore this email.</p>
         </div>
         <div class="footer">
             <p>&copy; ${new Date().getFullYear()} ${config.site_name || "MesseMatch"} — Smart Job Matching Platform</p>

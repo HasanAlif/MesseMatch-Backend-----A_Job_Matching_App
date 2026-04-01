@@ -52,7 +52,7 @@ const createUserIntoDb = async (payload: {
 
   // Generate OTP
   const otp = crypto.randomInt(100000, 999999).toString();
-  const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+  const otpExpiry = new Date(Date.now() + 60 * 1000); // 1 minute
 
   let user;
 
@@ -229,7 +229,7 @@ const resendRegistrationOtp = async (email: string) => {
 
   // Generate new OTP
   const otp = crypto.randomInt(100000, 999999).toString();
-  const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
+  const otpExpiry = new Date(Date.now() + 60 * 1000);
 
   await User.findByIdAndUpdate(user._id, {
     verificationOtp: otp,

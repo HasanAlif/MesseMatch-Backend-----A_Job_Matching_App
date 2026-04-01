@@ -1,14 +1,7 @@
 import crypto from "crypto";
 
-/**
- * Generates a random OTP (One Time Password) of the specified length.
- * The OTP is a numeric string.
- *
- * @param {number} validTime default: 5 minutes - The time (in minutes ) for which the OTP is valid.
- * @returns {number, Date} - The generated OTP and its expiration time.
- */
 export const generateOTP = (
-  validTime: number = 5,
+  validTime: number = 1,
 ): { otp: number; otpExpires: Date } => {
   const otp = Number(crypto.randomInt(1000, 9999));
 
