@@ -13,7 +13,6 @@ import {
   setUserOnline,
   setUserOffline,
   getOnlineUserIds,
-  getReceiverSocketId,
   messageService,
 } from "../app/modules/message/message.service";
 
@@ -22,14 +21,29 @@ interface AuthenticatedSocket extends Socket {
   userRole?: string;
 }
 
+interface SocketBinaryFilePayload {
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  data?: unknown;
+  buffer?: unknown;
+}
+
 interface SendMessagePayload {
   receiverId: string;
   text?: string;
   image?: string | string[];
+  files?: SocketBinaryFilePayload[];
+  clientMessageId?: string;
 }
 
 interface TypingPayload {
   receiverId: string;
+}
+
+interface MarkReadPayload {
+  senderId?: string;
+  receiverId?: string;
 }
 
 export const socketHandler = (io: Server) => {
@@ -102,6 +116,47 @@ export const socketHandler = (io: Server) => {
     // Broadcast online users
     io.emit("online_users", getOnlineUserIds());
 
+    const socketActionTimestamps: number[] = [];
+    const isRateLimited = (maxEvents: number, windowMs: number) => {
+      const now = Date.now();
+      while (
+        socketActionTimestamps.length > 0 &&
+        now - socketActionTimestamps[0] > windowMs
+      ) {
+        socketActionTimestamps.shift();
+      }
+
+      if (socketActionTimestamps.length >= maxEvents) {
+        return true;
+      }
+
+      socketActionTimestamps.push(now);
+      return false;
+    };
+
+    const parseSocketPayload = (rawPayload: any, eventName: string) => {
+      let payload = rawPayload;
+      if (typeof rawPayload === "string") {
+        try {
+          payload = JSON.parse(rawPayload);
+        } catch {
+          socket.emit("message_error", {
+            error: `${eventName} payload must be a valid JSON object`,
+          });
+          return null;
+        }
+      }
+
+      if (!payload || typeof payload !== "object") {
+        socket.emit("message_error", {
+          error: `${eventName} payload must be an object`,
+        });
+        return null;
+      }
+
+      return payload;
+    };
+
     // Handle: Get list of chattable users
     socket.on("users_list", async () => {
       try {
@@ -123,20 +178,23 @@ export const socketHandler = (io: Server) => {
 
     // Handle: Send message
     socket.on("send_message", async (rawPayload: any) => {
-      let payload = rawPayload;
-      // Handle case where client sends JSON string instead of object
-      if (typeof rawPayload === "string") {
-        try {
-          payload = JSON.parse(rawPayload);
-        } catch (e) {
-          socket.emit("message_error", {
-            error: "Payload must be a valid JSON object",
-          });
-          return;
-        }
+      const payload = parseSocketPayload(rawPayload, "send_message");
+      if (!payload) return;
+
+      if (isRateLimited(20, 10_000)) {
+        socket.emit("message_error", {
+          error: "Too many requests. Please try again shortly.",
+        });
+        return;
       }
 
-      const { receiverId, text = "", image } = payload;
+      const {
+        receiverId,
+        text = "",
+        image,
+        files,
+        clientMessageId,
+      } = payload as SendMessagePayload;
 
       try {
         if (!receiverId) {
@@ -144,12 +202,23 @@ export const socketHandler = (io: Server) => {
           return;
         }
 
-        // We delegate to messageService.sendMessage to avoid duplicate logic
-        const newMessageData = await messageService.sendMessage(
-          userId as string,
-          receiverId,
-          { text, image },
-        );
+        const normalizedReceiverId = String(receiverId);
+
+        let newMessageData: any;
+        if (Array.isArray(files) && files.length > 0) {
+          newMessageData = await messageService.sendMessageWithSocketFiles(
+            userId as string,
+            normalizedReceiverId,
+            { text, files, clientMessageId },
+          );
+        } else {
+          // We delegate to messageService.sendMessage to avoid duplicate logic
+          newMessageData = await messageService.sendMessage(
+            userId as string,
+            normalizedReceiverId,
+            { text, image },
+          );
+        }
 
         // Confirm to sender
         socket.emit("message_sent", newMessageData);
@@ -161,27 +230,96 @@ export const socketHandler = (io: Server) => {
       }
     });
 
+    // Handle: Send message with binary files (frontend primary event)
+    socket.on("send_message_files", async (rawPayload: any) => {
+      const payload = parseSocketPayload(rawPayload, "send_message_files");
+      if (!payload) return;
+
+      if (isRateLimited(12, 10_000)) {
+        socket.emit("message_error", {
+          error: "Too many upload requests. Please try again shortly.",
+        });
+        return;
+      }
+
+      const {
+        receiverId,
+        text = "",
+        files,
+        clientMessageId,
+      } = payload as SendMessagePayload;
+
+      try {
+        if (!receiverId) {
+          socket.emit("message_error", { error: "Receiver ID is required" });
+          return;
+        }
+
+        if (!Array.isArray(files) || files.length === 0) {
+          socket.emit("message_error", {
+            error: "At least one file is required",
+          });
+          return;
+        }
+
+        if (files.length > MESSAGE_CONFIG.MAX_IMAGES) {
+          socket.emit("message_error", {
+            error: `Cannot send more than ${MESSAGE_CONFIG.MAX_IMAGES} images`,
+          });
+          return;
+        }
+
+        const newMessageData = await messageService.sendMessageWithSocketFiles(
+          userId as string,
+          String(receiverId),
+          { text, files, clientMessageId },
+        );
+
+        socket.emit("message_sent", newMessageData);
+      } catch (error: any) {
+        socket.emit("message_error", {
+          error: "Failed to send files: " + (error.message || "Unknown error"),
+        });
+      }
+    });
+
     // Handle: Typing indicator
-    socket.on("typing", (payload: TypingPayload) => {
-      const { receiverId } = payload;
+    socket.on("typing", (rawPayload: TypingPayload | string) => {
+      const payload = parseSocketPayload(rawPayload, "typing");
+      if (!payload) return;
+
+      const { receiverId } = payload as TypingPayload;
       if (!receiverId) return;
 
-      // Better to emit to the room directly
-      io.to(receiverId).emit("user_typing", { userId });
+      const receiverRoom = String(receiverId);
+      io.to(receiverRoom).emit("user_typing", { userId });
+      // Backward-compatible alias for existing clients listening to 'typing'
+      io.to(receiverRoom).emit("typing", { userId });
     });
 
     // Handle: Stop typing indicator
-    socket.on("stop_typing", (payload: TypingPayload) => {
-      const { receiverId } = payload;
+    socket.on("stop_typing", (rawPayload: TypingPayload | string) => {
+      const payload = parseSocketPayload(rawPayload, "stop_typing");
+      if (!payload) return;
+
+      const { receiverId } = payload as TypingPayload;
       if (!receiverId) return;
 
-      // Better to emit to the room directly
-      io.to(receiverId).emit("user_stop_typing", { userId });
+      const receiverRoom = String(receiverId);
+      io.to(receiverRoom).emit("user_stop_typing", { userId });
+      // Backward-compatible alias for existing clients listening to 'stop_typing'
+      io.to(receiverRoom).emit("stop_typing", { userId });
     });
 
     // Handle: Mark messages as read
-    socket.on("mark_read", async (payload: { senderId: string }) => {
-      const { senderId } = payload;
+    socket.on("mark_read", async (rawPayload: MarkReadPayload | string) => {
+      const payload = parseSocketPayload(rawPayload, "mark_read");
+      if (!payload) return;
+
+      // Accept both keys for compatibility: senderId (preferred) and receiverId (legacy client)
+      const senderId =
+        (payload as MarkReadPayload).senderId ||
+        (payload as MarkReadPayload).receiverId;
       if (!senderId) return;
 
       try {
@@ -196,10 +334,14 @@ export const socketHandler = (io: Server) => {
           },
         );
 
-        // Notify sender directly to their room for multi-device support
-        io.to(senderId).emit("messages_read", { userId });
-      } catch (error) {
-        // Silent fail for read status
+        const senderRoom = String(senderId);
+        io.to(senderRoom).emit("messages_read", { userId });
+        // Backward-compatible alias for existing clients listening to 'mark_read'
+        io.to(senderRoom).emit("mark_read", { userId });
+      } catch {
+        socket.emit("message_error", {
+          error: "Failed to mark messages as read",
+        });
       }
     });
 

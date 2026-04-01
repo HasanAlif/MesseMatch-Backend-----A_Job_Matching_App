@@ -33,6 +33,17 @@ export const MESSAGE_CONFIG = {
   MAX_TEXT_LENGTH: 5000,
   MAX_IMAGES: 5,
   MAX_IMAGE_SIZE_MB: 10,
+  MAX_SOCKET_TOTAL_SIZE_MB: 25,
+  SOCKET_FILE_UPLOAD_CONCURRENCY: 2,
+  SOCKET_ALLOWED_IMAGE_MIME_TYPES: [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/heic",
+    "image/heif",
+  ],
   DEFAULT_PAGE_SIZE: 50,
   MAX_PAGE_SIZE: 100,
 };

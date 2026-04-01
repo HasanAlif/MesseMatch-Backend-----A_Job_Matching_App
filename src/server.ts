@@ -5,6 +5,7 @@ import "./shared/database";
 import app, { corsOptions } from "./app";
 import { initializeFirebase } from "./shared/firebase";
 import { socketHandler } from "./socket/socketHandler";
+import { MESSAGE_CONFIG } from "./app/modules/message/message.constants";
 
 let server: HttpServer;
 let io: SocketIOServer;
@@ -24,7 +25,7 @@ async function startServer() {
     pingTimeout: 60000,
     pingInterval: 25000,
     transports: ["websocket", "polling"],
-    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB for image uploads
+    maxHttpBufferSize: MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB * 1024 * 1024,
   });
 
   // Initialize socket handlers

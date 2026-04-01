@@ -3,6 +3,7 @@ import { Message } from "../../models/Message.model";
 import { User, UserRole, UserStatus } from "../../models/User.model";
 import { cloudinary } from "../../../helpars/fileUploader";
 import ApiError from "../../../errors/ApiErrors";
+import streamifier from "streamifier";
 import {
   ALLOWED_CHAT_PAIRS,
   MESSAGE_ERRORS,
@@ -49,6 +50,25 @@ const canUsersCommunicate = (role1: string, role2: string): boolean => {
 // Socket instance holders
 let ioInstance: any = null;
 const onlineUsers = new Map<string, string>();
+const socketMessageIdempotencyCache = new Map<
+  string,
+  { expiresAt: number; message: any }
+>();
+
+interface SocketFileInput {
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  data?: unknown;
+  buffer?: unknown;
+}
+
+interface NormalizedSocketFile {
+  fileName: string;
+  mimeType: string;
+  size: number;
+  buffer: Buffer;
+}
 
 export const setIO = (io: any) => {
   ioInstance = io;
@@ -70,6 +90,164 @@ export const setUserOffline = (userId: string) => {
 
 export const getOnlineUserIds = (): string[] => {
   return Array.from(onlineUsers.keys());
+};
+
+const cleanupIdempotencyCache = () => {
+  const now = Date.now();
+  for (const [key, value] of socketMessageIdempotencyCache.entries()) {
+    if (value.expiresAt <= now) {
+      socketMessageIdempotencyCache.delete(key);
+    }
+  }
+};
+
+const normalizeSocketBinary = (input: unknown): Buffer | null => {
+  if (!input) {
+    return null;
+  }
+
+  if (Buffer.isBuffer(input)) {
+    return input;
+  }
+
+  if (input instanceof ArrayBuffer) {
+    return Buffer.from(input);
+  }
+
+  if (ArrayBuffer.isView(input)) {
+    return Buffer.from(input.buffer, input.byteOffset, input.byteLength);
+  }
+
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (trimmed.startsWith("data:")) {
+      const commaIndex = trimmed.indexOf(",");
+      if (commaIndex === -1) {
+        return null;
+      }
+
+      const base64Part = trimmed.slice(commaIndex + 1);
+      return Buffer.from(base64Part, "base64");
+    }
+
+    return Buffer.from(trimmed, "base64");
+  }
+
+  return null;
+};
+
+const normalizeSocketFiles = (
+  rawFiles: SocketFileInput[],
+): NormalizedSocketFile[] => {
+  return rawFiles.map((file, index) => {
+    const binarySource = file.data ?? file.buffer;
+    const buffer = normalizeSocketBinary(binarySource);
+
+    if (!buffer || buffer.length === 0) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        `Invalid file data at index ${index}`,
+      );
+    }
+
+    const mimeType = (file.mimeType || "").toLowerCase();
+    if (!mimeType) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        `Missing mimeType for file at index ${index}`,
+      );
+    }
+
+    if (!MESSAGE_CONFIG.SOCKET_ALLOWED_IMAGE_MIME_TYPES.includes(mimeType)) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        `Unsupported file type at index ${index}`,
+      );
+    }
+
+    const maxSizeBytes = MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024;
+    if (buffer.length > maxSizeBytes) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        `File ${index + 1} too large. Maximum size is ${MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB}MB`,
+      );
+    }
+
+    return {
+      fileName: file.fileName || `socket_file_${Date.now()}_${index}`,
+      mimeType,
+      size: buffer.length,
+      buffer,
+    };
+  });
+};
+
+const uploadBufferToCloudinary = async (
+  file: NormalizedSocketFile,
+  index: number,
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "message_images",
+        resource_type: "image",
+        transformation: [
+          { width: 1000, height: 1000, crop: "limit" },
+          { quality: "auto:good" },
+          { format: "auto" },
+        ],
+      },
+      (error, result) => {
+        if (error || !result?.secure_url) {
+          reject(
+            new ApiError(
+              httpStatus.INTERNAL_SERVER_ERROR,
+              `${MESSAGE_ERRORS.UPLOAD_FAILED} ${index + 1}: ${error?.message || "Unknown upload error"}`,
+            ),
+          );
+          return;
+        }
+
+        resolve(result.secure_url);
+      },
+    );
+
+    streamifier.createReadStream(file.buffer).pipe(uploadStream);
+  });
+};
+
+const uploadFilesWithConcurrency = async (
+  files: NormalizedSocketFile[],
+): Promise<string[]> => {
+  const concurrency = Math.max(
+    1,
+    MESSAGE_CONFIG.SOCKET_FILE_UPLOAD_CONCURRENCY,
+  );
+  const results: string[] = new Array(files.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < files.length) {
+      const currentIndex = cursor;
+      cursor += 1;
+      results[currentIndex] = await uploadBufferToCloudinary(
+        files[currentIndex],
+        currentIndex,
+      );
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, files.length) },
+    () => worker(),
+  );
+
+  await Promise.all(workers);
+  return results;
 };
 
 // Get users for sidebar (users with conversation history)
@@ -210,7 +388,7 @@ const getMessages = async (
   }
 
   return {
-    messages: messages.reverse(),
+    messages,
     meta: {
       page,
       limit,
@@ -383,16 +561,120 @@ const sendMessage = async (
 
   // Emit to receiver via socket if online
   if (ioInstance) {
-    // 1. We check if they are in onlineUsers for our own tracking (optional)
-    const isOnline = onlineUsers.has(receiverId.toString());
-
-    if (isOnline) {
-      // 2. Best practice: emit to the room name (userId) so ALL of the user's connected devices get it
-      ioInstance.to(receiverId.toString()).emit("receive_message", messageData);
-    }
+    ioInstance.to(receiverId.toString()).emit("receive_message", messageData);
   }
 
   return messageData; // Return the plain object, not the Mongoose document
+};
+
+const sendMessageWithSocketFiles = async (
+  senderId: string,
+  receiverId: string,
+  data: {
+    text?: string;
+    files: SocketFileInput[];
+    clientMessageId?: string;
+  },
+) => {
+  const { text, files, clientMessageId } = data;
+
+  if (senderId === receiverId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.SELF_MESSAGE);
+  }
+
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
+  }
+
+  if (files.length > MESSAGE_CONFIG.MAX_IMAGES) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Cannot send more than ${MESSAGE_CONFIG.MAX_IMAGES} images`,
+    );
+  }
+
+  const messageText = text?.trim() || "";
+  if (messageText.length > MESSAGE_CONFIG.MAX_TEXT_LENGTH) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Message text cannot exceed ${MESSAGE_CONFIG.MAX_TEXT_LENGTH} characters`,
+    );
+  }
+
+  cleanupIdempotencyCache();
+  const normalizedClientMessageId = clientMessageId?.trim();
+  const idempotencyKey = normalizedClientMessageId
+    ? `${senderId}:${normalizedClientMessageId}`
+    : null;
+
+  if (idempotencyKey) {
+    const cached = socketMessageIdempotencyCache.get(idempotencyKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.message;
+    }
+  }
+
+  const [sender, receiver] = await Promise.all([
+    User.findById(senderId).select("_id role status"),
+    User.findById(receiverId).select("_id role status"),
+  ]);
+
+  if (!sender) {
+    throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.USER_NOT_FOUND);
+  }
+
+  if (!receiver) {
+    throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.RECEIVER_NOT_FOUND);
+  }
+
+  if (receiver.status !== UserStatus.ACTIVE) {
+    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.INACTIVE_USER);
+  }
+
+  validateChatPermission(sender.role, receiver.role);
+
+  const normalizedFiles = normalizeSocketFiles(files);
+  const totalSizeBytes = normalizedFiles.reduce(
+    (acc, file) => acc + file.size,
+    0,
+  );
+  const maxSocketTotalSizeBytes =
+    MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB * 1024 * 1024;
+  if (totalSizeBytes > maxSocketTotalSizeBytes) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Total file size cannot exceed ${MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB}MB`,
+    );
+  }
+
+  const imageUrls = await uploadFilesWithConcurrency(normalizedFiles);
+
+  if (!messageText && imageUrls.length === 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
+  }
+
+  const newMessage = new Message({
+    senderId,
+    receiverId,
+    text: messageText,
+    image: imageUrls,
+  });
+
+  await newMessage.save();
+  const messageData = newMessage.toObject();
+
+  if (ioInstance) {
+    ioInstance.to(receiverId.toString()).emit("receive_message", messageData);
+  }
+
+  if (idempotencyKey) {
+    socketMessageIdempotencyCache.set(idempotencyKey, {
+      expiresAt: Date.now() + 2 * 60 * 1000,
+      message: messageData,
+    });
+  }
+
+  return messageData;
 };
 
 // Get count of users with unread messages
@@ -428,6 +710,7 @@ export const messageService = {
   getUsersForSidebar,
   getMessages,
   sendMessage,
+  sendMessageWithSocketFiles,
   getUnreadMessageCount,
   markMessagesAsRead,
   validateChatPermission,
