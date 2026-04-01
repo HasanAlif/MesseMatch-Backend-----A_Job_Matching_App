@@ -60,10 +60,11 @@ router.post(
   AuthController.resetPassword,
 );
 
-// Google OAuth - Get auth URL
-router.get("/google", AuthController.getGoogleAuthUrl);
-
-// Google OAuth - Callback
-router.get("/google/callback", AuthController.googleCallback);
+// Social login
+router.post(
+  "/social-login",
+  validateRequest(authValidation.socialLoginSchema),
+  AuthController.socialLogin,
+);
 
 export const authRoutes = router;
