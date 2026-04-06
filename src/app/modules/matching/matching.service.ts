@@ -2,11 +2,13 @@ import mongoose from "mongoose";
 import httpStatus from "http-status";
 import { User, UserRole, UserStatus } from "../../models";
 import { Job, JobStatus } from "../job/job.model";
+import { JobRequest, JobRequestStatus } from "../job/jobRequest.model";
 import ApiError from "../../../errors/ApiErrors";
 import haversineDistance from "../../../utils/HeversineDistance";
 import { MATCHING_CONFIG } from "./matching.constants";
 
 interface FitterMatchingJob {
+  jobId: string;
   projectPicture?: string;
   projectName: string;
   companyName: string;
@@ -25,6 +27,13 @@ interface MatchingResponse {
 interface FitterProfile {
   role?: UserRole;
   status?: UserStatus;
+  profilePicture?: string;
+  userName?: string;
+  rating?: number;
+  jobCompleted?: number;
+  workLocations?: string[];
+  hourlyRate?: number;
+  dailyRate?: number;
   skills?: string[];
   spokenLanguages?: string[];
   lattitude?: number;
@@ -51,12 +60,49 @@ interface JobForMatching {
   createdBy: mongoose.Types.ObjectId;
 }
 
+interface RequestForJobPayload {
+  jobId: string;
+}
+
+interface RequestForJobResponse {
+  requestId: string;
+  jobId: string;
+  companyId: string;
+  fitterId: string;
+  profilePicture?: string;
+  distance?: number;
+  userName?: string;
+  rating?: number;
+  jobCompleted?: number;
+  workLocations: string[];
+  hourlyRate?: number;
+  dailyRate?: number;
+  spokenLanguages: string[];
+  skills: string[];
+  requestStatus: JobRequestStatus;
+}
+
+interface JobForRequest {
+  _id: mongoose.Types.ObjectId;
+  createdBy: mongoose.Types.ObjectId;
+  jobStatus?: JobStatus;
+}
+
+interface CompanyForRequest {
+  _id: mongoose.Types.ObjectId;
+  role?: UserRole;
+  status?: UserStatus;
+  lattitude?: number;
+  longitude?: number;
+}
+
 const normalizeTextArray = (values?: string[]): string[] => {
   if (!values || !values.length) {
     return [];
   }
 
   return values
+    .flatMap((value) => value.split(","))
     .map((value) => value.trim().toLowerCase())
     .filter((value) => value.length > 0);
 };
@@ -220,6 +266,7 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
       }
 
       acc.push({
+        jobId: job._id.toString(),
         projectPicture: job.projectPicture,
         projectName: job.projectName,
         companyName: company.companyName ?? "Unknown Company",
@@ -262,6 +309,144 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
   };
 };
 
+const requestForJob = async (
+  fitterId: string,
+  payload: RequestForJobPayload,
+): Promise<RequestForJobResponse> => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+
+  if (!payload?.jobId || !mongoose.Types.ObjectId.isValid(payload.jobId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid job ID");
+  }
+
+  const fitterObjectId = new mongoose.Types.ObjectId(fitterId);
+  const jobObjectId = new mongoose.Types.ObjectId(payload.jobId);
+
+  const fitter = await User.findById(fitterObjectId)
+    .select(
+      "role status profilePicture userName rating jobCompleted workLocations hourlyRate dailyRate spokenLanguages skills lattitude longitude",
+    )
+    .lean<FitterProfile>();
+
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  if (fitter.role !== UserRole.FITTER) {
+    throw new ApiError(httpStatus.FORBIDDEN, "Only fitters can request jobs");
+  }
+
+  if (fitter.status !== UserStatus.ACTIVE) {
+    throw new ApiError(httpStatus.FORBIDDEN, "Fitter account is not active");
+  }
+
+  const job = await Job.findById(jobObjectId)
+    .select("createdBy jobStatus")
+    .lean<JobForRequest>();
+
+  if (!job) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Job not found");
+  }
+
+  if (job.jobStatus !== JobStatus.ACTIVE) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Job is not active");
+  }
+
+  if (job.createdBy.toString() === fitterId) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "You cannot request your own job",
+    );
+  }
+
+  const company = await User.findById(job.createdBy)
+    .select("role status lattitude longitude")
+    .lean<CompanyForRequest>();
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Job posting company not found");
+  }
+
+  if (
+    company.role !== UserRole.COMPANY ||
+    company.status !== UserStatus.ACTIVE
+  ) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "Job posting company is not available",
+    );
+  }
+
+  const existingRequest = await JobRequest.findOne({
+    jobId: jobObjectId,
+    fitterId: fitterObjectId,
+  })
+    .select("_id")
+    .lean();
+
+  if (existingRequest) {
+    throw new ApiError(
+      httpStatus.CONFLICT,
+      "You have already requested this job",
+    );
+  }
+
+  const hasCoordinates =
+    typeof fitter.lattitude === "number" &&
+    typeof fitter.longitude === "number" &&
+    typeof company.lattitude === "number" &&
+    typeof company.longitude === "number";
+
+  const distance = hasCoordinates
+    ? roundToTwo(
+        haversineDistance(
+          fitter.lattitude as number,
+          fitter.longitude as number,
+          company.lattitude as number,
+          company.longitude as number,
+        ),
+      )
+    : undefined;
+
+  const createdRequest = await JobRequest.create({
+    jobId: jobObjectId,
+    companyId: company._id,
+    fitterId: fitterObjectId,
+    profilePicture: fitter.profilePicture,
+    distance,
+    userName: fitter.userName,
+    rating: fitter.rating,
+    jobCompleted: fitter.jobCompleted,
+    workLocations: fitter.workLocations ?? [],
+    hourlyRate: fitter.hourlyRate,
+    dailyRate: fitter.dailyRate,
+    spokenLanguages: fitter.spokenLanguages ?? [],
+    skills: fitter.skills ?? [],
+    requestStatus: JobRequestStatus.REQUESTED,
+  });
+
+  return {
+    requestId: createdRequest._id.toString(),
+    jobId: createdRequest.jobId.toString(),
+    companyId: createdRequest.companyId.toString(),
+    fitterId: createdRequest.fitterId.toString(),
+    profilePicture: createdRequest.profilePicture,
+    distance: createdRequest.distance,
+    userName: createdRequest.userName,
+    rating: createdRequest.rating,
+    jobCompleted: createdRequest.jobCompleted,
+    workLocations: createdRequest.workLocations ?? [],
+    hourlyRate: createdRequest.hourlyRate,
+    dailyRate: createdRequest.dailyRate,
+    spokenLanguages: createdRequest.spokenLanguages ?? [],
+    skills: createdRequest.skills ?? [],
+    requestStatus: createdRequest.requestStatus,
+  };
+};
+
 export const matchingService = {
   matchingForFitter,
+  requestForJob,
 };

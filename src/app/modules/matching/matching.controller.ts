@@ -19,6 +19,21 @@ const getMatchingJobsForFitter = catchAsync(
   },
 );
 
+const requestForJob = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const fitterId = req.user?.id as string;
+    const result = await matchingService.requestForJob(fitterId, req.body);
+
+    sendResponse(res, {
+      statusCode: httpStatus.CREATED,
+      success: true,
+      message: "Job request sent successfully",
+      data: result,
+    });
+  },
+);
+
 export const matchingController = {
   getMatchingJobsForFitter,
+  requestForJob,
 };

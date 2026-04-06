@@ -78,6 +78,8 @@ export interface IUser extends Document {
   dailyRate?: number;
   experienceYears?: number;
   bio?: string;
+  rating?: number;
+  jobCompleted?: number;
   plan?: Plan;
   lattitude?: number;
   longitude?: number;
@@ -221,6 +223,15 @@ const UserSchema = new Schema<IUser>(
     },
     bio: {
       type: String,
+    },
+    rating: {
+      type: Number,
+      min: 0,
+      max: 5,
+    },
+    jobCompleted: {
+      type: Number,
+      default: 0,
     },
     plan: {
       type: String,
