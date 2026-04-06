@@ -6,6 +6,7 @@ import cookieParser from "cookie-parser";
 import GlobalErrorHandler from "./app/middlewares/globalErrorHandler";
 import router from "./app/routes";
 import { LANDING_PAGE_TEMPLATE } from "./utils/Template";
+import normalizeUndefinedToNull from "./shared/normalizeUndefinedToNull";
 
 const app: Application = express();
 export const corsOptions = {
@@ -35,14 +36,16 @@ app.use(GlobalErrorHandler);
 
 // Not found handler
 app.use((req: Request, res: Response, next: NextFunction) => {
-  res.status(httpStatus.NOT_FOUND).json({
-    success: false,
-    message: "API NOT FOUND!",
-    error: {
-      path: req.originalUrl,
-      message: "Your requested path is not found!",
-    },
-  });
+  res.status(httpStatus.NOT_FOUND).json(
+    normalizeUndefinedToNull({
+      success: false,
+      message: "API NOT FOUND!",
+      error: {
+        path: req.originalUrl,
+        message: "Your requested path is not found!",
+      },
+    }),
+  );
 });
 
 export default app;

@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import handleZodError from "../../errors/handleZodError";
 import ApiError from "../../errors/ApiErrors";
 import parseMongooseValidationError from "../../errors/parseMongooseValidationError";
+import normalizeUndefinedToNull from "../../shared/normalizeUndefinedToNull";
 
 const config = {
   NODE_ENV: process.env.NODE_ENV || "development",
@@ -84,13 +85,15 @@ const GlobalErrorHandler = (
     errorSources.push("Unknown Error");
   }
 
-  res.status(statusCode).json({
-    success: false,
-    message,
-    errorSources,
-    err,
-    stack: config.NODE_ENV === "development" ? err?.stack : null,
-  });
+  res.status(statusCode).json(
+    normalizeUndefinedToNull({
+      success: false,
+      message,
+      errorSources,
+      err,
+      stack: config.NODE_ENV === "development" ? err?.stack : null,
+    }),
+  );
 };
 
 export default GlobalErrorHandler;

@@ -20,4 +20,17 @@ router.post(
   matchingController.requestForJob,
 );
 
+router.get(
+  "/company/requests",
+  auth(UserRole.COMPANY),
+  matchingController.getIncomingRequestsForCompany,
+);
+
+router.patch(
+  "/company/requests/:requestId",
+  auth(UserRole.COMPANY),
+  validateRequest(matchingValidation.updateRequestStatusSchema),
+  matchingController.updateRequestStatusForCompany,
+);
+
 export const matchingRoutes = router;

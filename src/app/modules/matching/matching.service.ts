@@ -82,6 +82,40 @@ interface RequestForJobResponse {
   requestStatus: JobRequestStatus;
 }
 
+interface IncomingRequestsFilter {
+  requestStatus?: JobRequestStatus;
+}
+
+interface IncomingCompanyRequest {
+  requestId: string;
+  FitterId: string | null;
+  projectPicture: string | null;
+  distance: number | null;
+  userName: string | null;
+  rating: number | null;
+  jobCompleted: number | null;
+  workLocations: string | null;
+  hourlyRate: number | null;
+  dailyRate: number | null;
+  spokenLanguages: string[] | null;
+  skills: string[] | null;
+  requestStatus: JobRequestStatus | null;
+}
+
+interface IncomingRequestsResponse {
+  incomingRequests: IncomingCompanyRequest[];
+}
+
+interface UpdateRequestStatusPayload {
+  requestStatus: JobRequestStatus.ACCEPTED | JobRequestStatus.REJECTED;
+}
+
+interface UpdateRequestStatusResponse {
+  requestId: string;
+  requestStatus: JobRequestStatus;
+  updatedAt: Date;
+}
+
 interface JobForRequest {
   _id: mongoose.Types.ObjectId;
   createdBy: mongoose.Types.ObjectId;
@@ -94,6 +128,31 @@ interface CompanyForRequest {
   status?: UserStatus;
   lattitude?: number;
   longitude?: number;
+}
+
+interface JobRequestForCompany {
+  _id: mongoose.Types.ObjectId;
+  jobId: mongoose.Types.ObjectId;
+  companyId: mongoose.Types.ObjectId;
+  fitterId: mongoose.Types.ObjectId;
+  profilePicture?: string;
+  distance?: number;
+  userName?: string;
+  rating?: number;
+  jobCompleted?: number;
+  workLocations?: string[];
+  hourlyRate?: number;
+  dailyRate?: number;
+  spokenLanguages?: string[];
+  skills?: string[];
+  requestStatus: JobRequestStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface JobPictureLookup {
+  _id: mongoose.Types.ObjectId;
+  projectPicture?: string;
 }
 
 const normalizeTextArray = (values?: string[]): string[] => {
@@ -166,6 +225,37 @@ const formatProjectPeriod = (
 };
 
 const roundToTwo = (value: number): number => Number(value.toFixed(2));
+
+const validateActiveCompany = async (
+  companyId: string,
+): Promise<mongoose.Types.ObjectId> => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+
+  const company = await User.findById(companyObjectId)
+    .select("role status")
+    .lean<{ role?: UserRole; status?: UserStatus }>();
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  if (company.role !== UserRole.COMPANY) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "Only companies can access this resource",
+    );
+  }
+
+  if (company.status !== UserStatus.ACTIVE) {
+    throw new ApiError(httpStatus.FORBIDDEN, "Company account is not active");
+  }
+
+  return companyObjectId;
+};
 
 const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -410,22 +500,36 @@ const requestForJob = async (
       )
     : undefined;
 
-  const createdRequest = await JobRequest.create({
-    jobId: jobObjectId,
-    companyId: company._id,
-    fitterId: fitterObjectId,
-    profilePicture: fitter.profilePicture,
-    distance,
-    userName: fitter.userName,
-    rating: fitter.rating,
-    jobCompleted: fitter.jobCompleted,
-    workLocations: fitter.workLocations ?? [],
-    hourlyRate: fitter.hourlyRate,
-    dailyRate: fitter.dailyRate,
-    spokenLanguages: fitter.spokenLanguages ?? [],
-    skills: fitter.skills ?? [],
-    requestStatus: JobRequestStatus.REQUESTED,
-  });
+  let createdRequest;
+
+  try {
+    createdRequest = await JobRequest.create({
+      jobId: jobObjectId,
+      companyId: company._id,
+      fitterId: fitterObjectId,
+      profilePicture: fitter.profilePicture,
+      distance,
+      userName: fitter.userName,
+      rating: fitter.rating,
+      jobCompleted: fitter.jobCompleted,
+      workLocations: fitter.workLocations ?? [],
+      hourlyRate: fitter.hourlyRate,
+      dailyRate: fitter.dailyRate,
+      spokenLanguages: fitter.spokenLanguages ?? [],
+      skills: fitter.skills ?? [],
+      requestStatus: JobRequestStatus.REQUESTED,
+    });
+  } catch (error) {
+    const mongoError = error as { code?: number };
+    if (mongoError.code === 11000) {
+      throw new ApiError(
+        httpStatus.CONFLICT,
+        "You have already requested this job",
+      );
+    }
+
+    throw error;
+  }
 
   return {
     requestId: createdRequest._id.toString(),
@@ -446,7 +550,129 @@ const requestForJob = async (
   };
 };
 
+const getIncomingRequestsForCompany = async (
+  companyId: string,
+  filters?: IncomingRequestsFilter,
+): Promise<IncomingRequestsResponse> => {
+  const companyObjectId = await validateActiveCompany(companyId);
+
+  const query: {
+    companyId: mongoose.Types.ObjectId;
+    requestStatus?: JobRequestStatus;
+  } = {
+    companyId: companyObjectId,
+  };
+
+  if (filters?.requestStatus) {
+    query.requestStatus = filters.requestStatus;
+  }
+
+  const requests = await JobRequest.find(query)
+    .sort({ createdAt: -1 })
+    .lean<JobRequestForCompany[]>();
+
+  if (!requests.length) {
+    return { incomingRequests: [] };
+  }
+
+  const jobIds = [
+    ...new Set(requests.map((request) => request.jobId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const jobs = await Job.find({ _id: { $in: jobIds } })
+    .select("projectPicture")
+    .lean<JobPictureLookup[]>();
+
+  const jobPictureMap = new Map(
+    jobs.map((job) => [job._id.toString(), job.projectPicture ?? null]),
+  );
+
+  return {
+    incomingRequests: requests.map((request) => {
+      return {
+        requestId: request._id.toString(),
+        FitterId: request.fitterId ? request.fitterId.toString() : null,
+        projectPicture: jobPictureMap.get(request.jobId.toString()) ?? null,
+        distance:
+          typeof request.distance === "number" ? request.distance : null,
+        userName: request.userName ?? null,
+        rating: typeof request.rating === "number" ? request.rating : null,
+        jobCompleted:
+          typeof request.jobCompleted === "number"
+            ? request.jobCompleted
+            : null,
+        workLocations:
+          request.workLocations && request.workLocations.length > 0
+            ? request.workLocations[0]
+            : null,
+        hourlyRate:
+          typeof request.hourlyRate === "number" ? request.hourlyRate : null,
+        dailyRate:
+          typeof request.dailyRate === "number" ? request.dailyRate : null,
+        spokenLanguages:
+          request.spokenLanguages && request.spokenLanguages.length > 0
+            ? request.spokenLanguages
+            : null,
+        skills:
+          request.skills && request.skills.length > 0 ? request.skills : null,
+        requestStatus: request.requestStatus ?? null,
+      };
+    }),
+  };
+};
+
+const updateRequestStatusForCompany = async (
+  companyId: string,
+  requestId: string,
+  payload: UpdateRequestStatusPayload,
+): Promise<UpdateRequestStatusResponse> => {
+  const companyObjectId = await validateActiveCompany(companyId);
+
+  if (!mongoose.Types.ObjectId.isValid(requestId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid request ID");
+  }
+
+  const requestObjectId = new mongoose.Types.ObjectId(requestId);
+
+  if (
+    payload.requestStatus !== JobRequestStatus.ACCEPTED &&
+    payload.requestStatus !== JobRequestStatus.REJECTED
+  ) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Request status must be ACCEPTED or REJECTED",
+    );
+  }
+
+  const existingRequest = await JobRequest.findOne({
+    _id: requestObjectId,
+    companyId: companyObjectId,
+  });
+
+  if (!existingRequest) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Job request not found");
+  }
+
+  if (existingRequest.requestStatus !== JobRequestStatus.REQUESTED) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Only REQUESTED jobs can be accepted or rejected",
+    );
+  }
+
+  existingRequest.requestStatus = payload.requestStatus;
+  const updatedRequest = await existingRequest.save();
+
+  return {
+    requestId: updatedRequest._id.toString(),
+    requestStatus: updatedRequest.requestStatus,
+    updatedAt: updatedRequest.updatedAt,
+  };
+};
+
 export const matchingService = {
   matchingForFitter,
   requestForJob,
+  getIncomingRequestsForCompany,
+  updateRequestStatusForCompany,
 };

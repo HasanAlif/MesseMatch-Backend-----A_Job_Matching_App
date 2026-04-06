@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
+import { JobRequestStatus } from "../job/jobRequest.model";
 
 const requestForJobSchema = z.object({
   jobId: z
@@ -9,6 +10,14 @@ const requestForJobSchema = z.object({
     }),
 });
 
+const updateRequestStatusSchema = z.object({
+  requestStatus: z.enum([
+    JobRequestStatus.ACCEPTED,
+    JobRequestStatus.REJECTED,
+  ] as const),
+});
+
 export const matchingValidation = {
   requestForJobSchema,
+  updateRequestStatusSchema,
 };

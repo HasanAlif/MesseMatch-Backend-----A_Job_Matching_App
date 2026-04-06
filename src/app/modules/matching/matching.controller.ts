@@ -4,6 +4,7 @@ import httpStatus from "http-status";
 import sendResponse from "../../../shared/sendResponse";
 import catchAsync from "../../../shared/catchAsync";
 import { matchingService } from "./matching.service";
+import { JobRequestStatus } from "../job/jobRequest.model";
 
 const getMatchingJobsForFitter = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
@@ -33,7 +34,50 @@ const requestForJob = catchAsync(
   },
 );
 
+const getIncomingRequestsForCompany = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const requestStatus = req.query.requestStatus as
+      | JobRequestStatus
+      | undefined;
+
+    const result = await matchingService.getIncomingRequestsForCompany(
+      companyId,
+      { requestStatus },
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Incoming requests retrieved successfully",
+      data: result,
+    });
+  },
+);
+
+const updateRequestStatusForCompany = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const { requestId } = req.params;
+
+    const result = await matchingService.updateRequestStatusForCompany(
+      companyId,
+      requestId,
+      req.body,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Request status updated successfully",
+      data: result,
+    });
+  },
+);
+
 export const matchingController = {
   getMatchingJobsForFitter,
   requestForJob,
+  getIncomingRequestsForCompany,
+  updateRequestStatusForCompany,
 };
