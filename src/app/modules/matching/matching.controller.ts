@@ -55,6 +55,21 @@ const getIncomingRequestsForCompany = catchAsync(
   },
 );
 
+const getActiveJobRequestsForCompany = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const result =
+      await matchingService.getActiveJobRequestsForCompany(companyId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Active requests retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 const updateRequestStatusForCompany = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const companyId = req.user?.id as string;
@@ -79,5 +94,6 @@ export const matchingController = {
   getMatchingJobsForFitter,
   requestForJob,
   getIncomingRequestsForCompany,
+  getActiveJobRequestsForCompany,
   updateRequestStatusForCompany,
 };

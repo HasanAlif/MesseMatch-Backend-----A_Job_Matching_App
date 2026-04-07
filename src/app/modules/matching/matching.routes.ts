@@ -26,6 +26,12 @@ router.get(
   matchingController.getIncomingRequestsForCompany,
 );
 
+router.get(
+  "/company/requests/active",
+  auth(UserRole.COMPANY),
+  matchingController.getActiveJobRequestsForCompany,
+);
+
 router.patch(
   "/company/requests/:requestId",
   auth(UserRole.COMPANY),
