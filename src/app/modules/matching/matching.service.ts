@@ -876,6 +876,115 @@ const completeJobRequestForCompany = async (
   await existingRequest.save();
 };
 
+const getCompletedJobRequestsForCompany = async (
+  companyId: string,
+): Promise<ActiveRequestsResponse> => {
+  const companyObjectId = await validateActiveCompany(companyId);
+
+  const requests = await JobRequest.find({
+    companyId: companyObjectId,
+    requestStatus: JobRequestStatus.COMPLETED,
+  })
+    .sort({ createdAt: -1 })
+    .lean<JobRequestForCompany[]>();
+
+  if (!requests.length) {
+    return { activeRequests: [] };
+  }
+
+  const jobIds = [
+    ...new Set(requests.map((request) => request.jobId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const fitterIds = [
+    ...new Set(requests.map((request) => request.fitterId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const [jobs, fitters] = await Promise.all([
+    Job.find({ _id: { $in: jobIds } })
+      .select(
+        "projectPicture projectPeriodFrom projectPeriodTo personNeeded requieredSkills projectName",
+      )
+      .lean<JobForActiveRequestLookup[]>(),
+    User.find({ _id: { $in: fitterIds } })
+      .select(
+        "fullName userName profilePicture rating workLocations hourlyRate dailyRate",
+      )
+      .lean<FitterForActiveRequestLookup[]>(),
+  ]);
+
+  const jobMap = new Map(jobs.map((job) => [job._id.toString(), job]));
+  const fitterMap = new Map(
+    fitters.map((fitter) => [fitter._id.toString(), fitter]),
+  );
+
+  return {
+    activeRequests: requests.map((request) => {
+      const job = jobMap.get(request.jobId.toString());
+      const fitter = fitterMap.get(request.fitterId.toString());
+
+      const locationValues =
+        fitter?.workLocations && fitter.workLocations.length > 0
+          ? fitter.workLocations
+          : request.workLocations;
+
+      const dateRange = formatProjectPeriod(
+        job?.projectPeriodFrom,
+        job?.projectPeriodTo,
+      );
+
+      const days = calculateDaysBetween(
+        job?.projectPeriodFrom,
+        job?.projectPeriodTo,
+      );
+
+      return {
+        requestId: request._id.toString(),
+        FitterId: request.fitterId ? request.fitterId.toString() : null,
+        projectPicture: job?.projectPicture ?? null,
+        projectName: job?.projectName ?? null,
+        fullName: fitter?.fullName ?? null,
+        userName: fitter?.userName ?? request.userName ?? null,
+        profilePicture:
+          fitter?.profilePicture ?? request.profilePicture ?? null,
+        rating:
+          typeof fitter?.rating === "number"
+            ? fitter.rating
+            : typeof request.rating === "number"
+              ? request.rating
+              : null,
+        workLocations:
+          locationValues && locationValues.length > 0
+            ? locationValues.join(", ")
+            : null,
+        distance:
+          typeof request.distance === "number" ? request.distance : null,
+        hourlyRate:
+          typeof fitter?.hourlyRate === "number"
+            ? fitter.hourlyRate
+            : typeof request.hourlyRate === "number"
+              ? request.hourlyRate
+              : null,
+        dailyRate:
+          typeof fitter?.dailyRate === "number"
+            ? fitter.dailyRate
+            : typeof request.dailyRate === "number"
+              ? request.dailyRate
+              : null,
+        days: typeof days === "number" ? days : null,
+        personNeeded:
+          typeof job?.personNeeded === "number" ? job.personNeeded : null,
+        dateRange: dateRange ?? null,
+        requieredSkills:
+          job?.requieredSkills && job.requieredSkills.length > 0
+            ? job.requieredSkills
+            : null,
+        requestStatus: request.requestStatus ?? null,
+      };
+    }),
+  };
+};
+
 export const matchingService = {
   matchingForFitter,
   requestForJob,
@@ -883,4 +992,5 @@ export const matchingService = {
   getActiveJobRequestsForCompany,
   updateRequestStatusForCompany,
   completeJobRequestForCompany,
+  getCompletedJobRequestsForCompany,
 };

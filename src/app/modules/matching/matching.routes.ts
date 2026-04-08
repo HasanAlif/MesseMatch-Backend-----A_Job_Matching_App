@@ -45,4 +45,10 @@ router.patch(
   matchingController.completeJobRequestForCompany,
 );
 
+router.get(
+  "/company/requests/completed",
+  auth(UserRole.COMPANY),
+  matchingController.getCompletedJobRequestsForCompany,
+);
+
 export const matchingRoutes = router;
