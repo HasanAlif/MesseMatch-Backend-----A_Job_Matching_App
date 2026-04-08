@@ -39,4 +39,10 @@ router.patch(
   matchingController.updateRequestStatusForCompany,
 );
 
+router.patch(
+  "/company/requests/:requestId/complete",
+  auth(UserRole.COMPANY),
+  matchingController.completeJobRequestForCompany,
+);
+
 export const matchingRoutes = router;

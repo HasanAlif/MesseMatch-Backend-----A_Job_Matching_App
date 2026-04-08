@@ -90,10 +90,30 @@ const updateRequestStatusForCompany = catchAsync(
   },
 );
 
+const completeJobRequestForCompany = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const { requestId } = req.params;
+
+    const result = await matchingService.completeJobRequestForCompany(
+      companyId,
+      requestId,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Job request marked as completed successfully",
+      data: result,
+    });
+  },
+);
+
 export const matchingController = {
   getMatchingJobsForFitter,
   requestForJob,
   getIncomingRequestsForCompany,
   getActiveJobRequestsForCompany,
   updateRequestStatusForCompany,
+  completeJobRequestForCompany,
 };

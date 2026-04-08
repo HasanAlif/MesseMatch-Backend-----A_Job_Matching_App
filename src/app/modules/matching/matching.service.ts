@@ -846,10 +846,41 @@ const getActiveJobRequestsForCompany = async (
   };
 };
 
+const completeJobRequestForCompany = async (
+  companyId: string,
+  requestId: string,
+): Promise<void> => {
+  const companyObjectId = await validateActiveCompany(companyId);
+  if (!mongoose.Types.ObjectId.isValid(requestId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid request ID");
+  }
+
+  const requestObjectId = new mongoose.Types.ObjectId(requestId);
+
+  const existingRequest = await JobRequest.findOne({
+    _id: requestObjectId,
+    companyId: companyObjectId,
+  });
+  if (!existingRequest) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Request not found");
+  }
+
+  if (existingRequest.requestStatus !== JobRequestStatus.ACCEPTED) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Only ACCEPTED requests can be completed",
+    );
+  }
+
+  existingRequest.requestStatus = JobRequestStatus.COMPLETED;
+  await existingRequest.save();
+};
+
 export const matchingService = {
   matchingForFitter,
   requestForJob,
   getIncomingRequestsForCompany,
   getActiveJobRequestsForCompany,
   updateRequestStatusForCompany,
+  completeJobRequestForCompany,
 };
