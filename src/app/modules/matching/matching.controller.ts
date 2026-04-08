@@ -125,6 +125,27 @@ const getCompletedJobRequestsForCompany = catchAsync(
   },
 );
 
+const giveRatingAndReviewToFitter = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const { requestId } = req.params;
+
+    const result =
+      await matchingService.giveRatingAndReviewToFitterForCompletedJob(
+        companyId,
+        requestId,
+        req.body,
+      );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Rating and review submitted successfully",
+      data: result,
+    });
+  },
+);
+
 export const matchingController = {
   getMatchingJobsForFitter,
   requestForJob,
@@ -133,4 +154,5 @@ export const matchingController = {
   updateRequestStatusForCompany,
   completeJobRequestForCompany,
   getCompletedJobRequestsForCompany,
+  giveRatingAndReviewToFitter,
 };

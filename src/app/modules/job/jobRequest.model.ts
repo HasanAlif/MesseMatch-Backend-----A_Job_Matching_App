@@ -23,6 +23,9 @@ export interface IJobRequest extends Document {
   spokenLanguages?: string[];
   skills?: string[];
   requestStatus: JobRequestStatus;
+  companyRating?: number;
+  companyReview?: string;
+  reviewedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -84,6 +87,17 @@ const JobRequestSchema = new Schema<IJobRequest>(
       type: String,
       enum: Object.values(JobRequestStatus),
       default: JobRequestStatus.REQUESTED,
+    },
+    companyRating: {
+      type: Number,
+      min: 1,
+      max: 5,
+    },
+    companyReview: {
+      type: String,
+    },
+    reviewedAt: {
+      type: Date,
     },
   },
   {

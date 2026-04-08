@@ -51,4 +51,11 @@ router.get(
   matchingController.getCompletedJobRequestsForCompany,
 );
 
+router.patch(
+  "/company/requests/:requestId/rate-and-review",
+  auth(UserRole.COMPANY),
+  validateRequest(matchingValidation.giveRatingAndReviewSchema),
+  matchingController.giveRatingAndReviewToFitter,
+);
+
 export const matchingRoutes = router;

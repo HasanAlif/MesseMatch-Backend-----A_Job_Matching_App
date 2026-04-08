@@ -200,6 +200,19 @@ interface FitterForActiveRequestLookup {
   dailyRate?: number;
 }
 
+interface GiveRatingAndReviewPayload {
+  rating: number;
+  review?: string;
+}
+
+interface GiveRatingAndReviewResponse {
+  requestId: string;
+  rating: number;
+  review?: string;
+  reviewedAt: Date;
+  updatedFitterRating: number;
+}
+
 const normalizeTextArray = (values?: string[]): string[] => {
   if (!values || !values.length) {
     return [];
@@ -985,6 +998,87 @@ const getCompletedJobRequestsForCompany = async (
   };
 };
 
+const giveRatingAndReviewToFitterForCompletedJob = async (
+  companyId: string,
+  requestId: string,
+  payload: GiveRatingAndReviewPayload,
+): Promise<GiveRatingAndReviewResponse> => {
+  const companyObjectId = await validateActiveCompany(companyId);
+
+  if (!mongoose.Types.ObjectId.isValid(requestId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid request ID");
+  }
+
+  const requestObjectId = new mongoose.Types.ObjectId(requestId);
+
+  const jobRequest = await JobRequest.findOne({
+    _id: requestObjectId,
+    companyId: companyObjectId,
+  });
+
+  if (!jobRequest) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Job request not found");
+  }
+
+  if (jobRequest.requestStatus !== JobRequestStatus.COMPLETED) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Only COMPLETED requests can be rated",
+    );
+  }
+
+  if (
+    jobRequest.companyRating !== undefined &&
+    jobRequest.companyRating !== null
+  ) {
+    throw new ApiError(
+      httpStatus.CONFLICT,
+      "This request has already been rated",
+    );
+  }
+
+  const reviewedAt = new Date();
+  jobRequest.companyRating = payload.rating;
+  jobRequest.companyReview = payload.review;
+  jobRequest.reviewedAt = reviewedAt;
+  const updatedJobRequest = await jobRequest.save();
+
+  // Calculate new average rating for the fitter
+  const ratedRequests = await JobRequest.find({
+    fitterId: jobRequest.fitterId,
+    requestStatus: JobRequestStatus.COMPLETED,
+    companyRating: { $exists: true, $ne: null },
+  })
+    .select("companyRating")
+    .lean<{ companyRating: number }[]>();
+
+  let newAverageRating = 0;
+  if (ratedRequests.length > 0) {
+    const totalRating = ratedRequests.reduce(
+      (sum, req) => sum + req.companyRating,
+      0,
+    );
+    newAverageRating = roundToTwo(totalRating / ratedRequests.length);
+  }
+
+  // Update fitter's rating
+  await User.findByIdAndUpdate(
+    jobRequest.fitterId,
+    {
+      rating: newAverageRating,
+    },
+    { new: true },
+  );
+
+  return {
+    requestId: updatedJobRequest._id.toString(),
+    rating: updatedJobRequest.companyRating!,
+    review: updatedJobRequest.companyReview,
+    reviewedAt: updatedJobRequest.reviewedAt!,
+    updatedFitterRating: newAverageRating,
+  };
+};
+
 export const matchingService = {
   matchingForFitter,
   requestForJob,
@@ -993,4 +1087,5 @@ export const matchingService = {
   updateRequestStatusForCompany,
   completeJobRequestForCompany,
   getCompletedJobRequestsForCompany,
+  giveRatingAndReviewToFitterForCompletedJob,
 };
