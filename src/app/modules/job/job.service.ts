@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { Job, IJob } from "./job.model";
+import { Job, IJob, JobStatus } from "./job.model";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { fileUploader } from "../../../helpars/fileUploader";
@@ -21,6 +21,22 @@ interface CreateJobPayload {
 
 interface UpdateJobPayload extends Partial<CreateJobPayload> {
   jobStatus?: "ACTIVE" | "PAUSED";
+}
+
+interface CompanyJobDetail {
+  jobId: string;
+  projectName: string;
+  jobStatus: JobStatus;
+  location: string | null;
+  period: string | undefined;
+  applicants: number;
+  personNeeded: number | null;
+}
+
+interface CompanyJobsWithApplicantsResponse {
+  totalApplicant: number;
+  activeJob: number;
+  data: CompanyJobDetail[];
 }
 
 // Helper function to format date range based on month and year differences
@@ -139,21 +155,87 @@ const updateJob = async (
   return updatedJob;
 };
 
-const getJobsByCompany = async (companyId: string) => {
+const getJobsByCompany = async (
+  companyId: string,
+): Promise<CompanyJobsWithApplicantsResponse> => {
   if (!mongoose.Types.ObjectId.isValid(companyId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
   }
 
-  const jobs = await Job.find({ createdBy: companyId }).sort({ createdAt: -1 });
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
 
-  // Map to response format with only required fields and formatted period
-  return jobs.map((job) => ({
-    jobId: job._id,
-    projectName: job.projectName,
-    location: job.projectLocation,
-    personNeeded: job.personNeeded,
-    period: formatProjectPeriod(job.projectPeriodFrom, job.projectPeriodTo),
-  }));
+  // Aggregation pipeline to get jobs with applicant counts
+  const jobsWithApplicants = await Job.aggregate([
+    {
+      $match: { createdBy: companyObjectId },
+    },
+    {
+      $lookup: {
+        from: "jobrequests",
+        let: { jobId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$jobId", "$$jobId"] },
+              requestStatus: "REQUESTED",
+            },
+          },
+          {
+            $count: "count",
+          },
+        ],
+        as: "applicantData",
+      },
+    },
+    {
+      $sort: { createdAt: -1 },
+    },
+    {
+      $project: {
+        _id: 1,
+        projectName: 1,
+        projectLocation: 1,
+        projectPeriodFrom: 1,
+        projectPeriodTo: 1,
+        personNeeded: 1,
+        jobStatus: 1,
+        applicantCount: {
+          $cond: [
+            { $gt: [{ $size: "$applicantData" }, 0] },
+            { $arrayElemAt: ["$applicantData.count", 0] },
+            0,
+          ],
+        },
+      },
+    },
+  ]);
+
+  // Calculate totals
+  let totalApplicant = 0;
+  let activeJob = 0;
+
+  const formattedJobs: CompanyJobDetail[] = jobsWithApplicants.map((job) => {
+    totalApplicant += job.applicantCount;
+    if (job.jobStatus === JobStatus.ACTIVE) {
+      activeJob += 1;
+    }
+
+    return {
+      jobId: job._id.toString(),
+      projectName: job.projectName,
+      jobStatus: job.jobStatus,
+      location: job.projectLocation ?? null,
+      period: formatProjectPeriod(job.projectPeriodFrom, job.projectPeriodTo),
+      applicants: job.applicantCount,
+      personNeeded: job.personNeeded ?? null,
+    };
+  });
+
+  return {
+    totalApplicant,
+    activeJob,
+    data: formattedJobs,
+  };
 };
 
 const deleteJob = async (jobId: string, companyId: string): Promise<void> => {
