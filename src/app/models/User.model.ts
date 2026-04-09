@@ -50,6 +50,7 @@ export interface IUser extends Document {
   mobileNumber: string;
   password: string;
   profilePicture?: string;
+  profilePicturePublicId?: string;
   role: UserRole;
   companyName?: string;
   businessEmail?: string;
@@ -117,6 +118,9 @@ const UserSchema = new Schema<IUser>(
       select: false,
     },
     profilePicture: {
+      type: String,
+    },
+    profilePicturePublicId: {
       type: String,
     },
     role: {

@@ -1,0 +1,30 @@
+import { Request, Response } from "express";
+import { JwtPayload } from "jsonwebtoken";
+import httpStatus from "http-status";
+import sendResponse from "../../../shared/sendResponse";
+import catchAsync from "../../../shared/catchAsync";
+import { profileService } from "./profile.service";
+
+const updateCompanyProfile = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const profilePictureFile = req.file;
+
+    const result = await profileService.updateCompanyProfile(
+      companyId,
+      req.body,
+      profilePictureFile,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Profile updated successfully",
+      data: result,
+    });
+  },
+);
+
+export const profileController = {
+  updateCompanyProfile,
+};
