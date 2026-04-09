@@ -26,6 +26,13 @@ router.patch(
 
 router.get("/my-jobs", auth(UserRole.COMPANY), jobController.getMyJobs);
 
+router.patch(
+  "/:jobId/status",
+  auth(UserRole.COMPANY),
+  validateRequest(jobValidation.changeJobStatusSchema),
+  jobController.changeJobStatus,
+);
+
 router.delete("/:id", auth(UserRole.COMPANY), jobController.deleteJob);
 
 export const jobRoutes = router;

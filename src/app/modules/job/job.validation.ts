@@ -160,7 +160,14 @@ const updateSchema = z
     },
   );
 
+const changeJobStatusSchema = z.object({
+  jobStatus: z.enum(["ACTIVE", "PAUSED"] as const, {
+    errorMap: () => ({ message: "Job status must be ACTIVE or PAUSED" }),
+  }),
+});
+
 export const jobValidation = {
   createSchema,
   updateSchema,
+  changeJobStatusSchema,
 };

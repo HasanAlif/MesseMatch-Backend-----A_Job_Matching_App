@@ -78,9 +78,35 @@ const deleteJob = catchAsync(
   },
 );
 
+const changeJobStatus = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const { jobId } = req.params;
+    const { jobStatus } = req.body;
+
+    const result = await jobService.changeJobStatus(
+      jobId,
+      companyId,
+      jobStatus,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Job status updated successfully",
+      data: {
+        jobId: result._id.toString(),
+        jobStatus: result.jobStatus,
+        updatedAt: result.updatedAt,
+      },
+    });
+  },
+);
+
 export const jobController = {
   createJob,
   updateJob,
   getMyJobs,
   deleteJob,
+  changeJobStatus,
 };

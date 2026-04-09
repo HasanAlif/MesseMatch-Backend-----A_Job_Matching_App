@@ -238,6 +238,37 @@ const getJobsByCompany = async (
   };
 };
 
+const changeJobStatus = async (
+  jobId: string,
+  companyId: string,
+  newStatus: JobStatus,
+): Promise<IJob> => {
+  if (!mongoose.Types.ObjectId.isValid(jobId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid job ID");
+  }
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const existingJob = await Job.findById(jobId);
+
+  if (!existingJob) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Job not found");
+  }
+
+  if (existingJob.createdBy.toString() !== companyId) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "You are not authorized to change the status of this job",
+    );
+  }
+
+  existingJob.jobStatus = newStatus;
+  await existingJob.save();
+
+  return existingJob;
+};
+
 const deleteJob = async (jobId: string, companyId: string): Promise<void> => {
   if (!mongoose.Types.ObjectId.isValid(jobId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid job ID");
@@ -278,4 +309,5 @@ export const jobService = {
   updateJob,
   getJobsByCompany,
   deleteJob,
+  changeJobStatus,
 };
