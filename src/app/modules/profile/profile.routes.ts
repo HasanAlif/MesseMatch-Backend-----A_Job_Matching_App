@@ -34,4 +34,11 @@ router.patch(
   profileController.updateCompanyInfo,
 );
 
+router.post(
+  "/change-password",
+  auth(),
+  validateRequest(profileValidation.changePasswordSchema),
+  profileController.changePassword,
+);
+
 export const profileRoutes = router;

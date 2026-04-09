@@ -1,3 +1,4 @@
+import * as bcrypt from "bcrypt";
 import mongoose from "mongoose";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
@@ -172,9 +173,39 @@ const updateCompanyInfo = async (
   };
 };
 
+const changePassword = async (
+  userId: string,
+  oldPassword: string,
+  newPassword: string,
+) => {
+  const user = await User.findById(userId).select("+password").lean();
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  if (!user.password) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Cannot change password for Google sign-in accounts",
+    );
+  }
+
+  const isMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isMatch) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, "Old password is incorrect");
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+  await User.findByIdAndUpdate(userId, { password: hashedPassword });
+
+  return { message: "Password changed successfully" };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
   getCompanyInfo,
   updateCompanyInfo,
+  changePassword,
 };
