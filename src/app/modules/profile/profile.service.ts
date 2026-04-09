@@ -95,7 +95,24 @@ const updateCompanyProfile = async (
   };
 };
 
+const getCompanyInfo = async (companyId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const company = await User.findById(companyId).select(
+    "companyName businessEmail contactPersonName",
+  );
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  return company;
+};
+
 export const profileService = {
   updateCompanyProfile,
   getCompanyProfile,
+  getCompanyInfo,
 };

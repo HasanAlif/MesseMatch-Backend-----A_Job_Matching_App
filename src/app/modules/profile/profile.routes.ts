@@ -22,4 +22,10 @@ router.patch(
   profileController.updateCompanyProfile,
 );
 
+router.get(
+  "/company/info",
+  auth(UserRole.COMPANY),
+  profileController.getCompanyInfo,
+);
+
 export const profileRoutes = router;
