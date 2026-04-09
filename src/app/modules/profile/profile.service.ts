@@ -111,8 +111,70 @@ const getCompanyInfo = async (companyId: string) => {
   return company;
 };
 
+const updateCompanyInfo = async (
+  companyId: string,
+  payload: {
+    companyName?: string;
+    businessEmail?: string;
+    contactPersonName?: string;
+  },
+): Promise<{
+  companyName?: string;
+  businessEmail?: string;
+  contactPersonName?: string;
+  updatedAt: Date;
+}> => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const company = await User.findById(companyId);
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  if (company.role !== UserRole.COMPANY) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "Only companies can update this profile",
+    );
+  }
+
+  const updateData: Record<string, unknown> = {};
+
+  if (payload.companyName) {
+    updateData.companyName = payload.companyName;
+  }
+  if (payload.businessEmail) {
+    updateData.businessEmail = payload.businessEmail;
+  }
+  if (payload.contactPersonName) {
+    updateData.contactPersonName = payload.contactPersonName;
+  }
+
+  const updatedCompany = await User.findByIdAndUpdate(companyId, updateData, {
+    new: true,
+    runValidators: true,
+  }).select("companyName businessEmail contactPersonName updatedAt");
+
+  if (!updatedCompany) {
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Failed to update profile",
+    );
+  }
+
+  return {
+    companyName: updatedCompany.companyName,
+    businessEmail: updatedCompany.businessEmail,
+    contactPersonName: updatedCompany.contactPersonName,
+    updatedAt: updatedCompany.updatedAt,
+  };
+};
+
 export const profileService = {
-  updateCompanyProfile,
   getCompanyProfile,
+  updateCompanyProfile,
   getCompanyInfo,
+  updateCompanyInfo,
 };

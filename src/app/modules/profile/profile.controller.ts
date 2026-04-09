@@ -55,8 +55,24 @@ const getCompanyInfo = catchAsync(
   },
 );
 
+const updateCompanyInfo = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+
+    const result = await profileService.updateCompanyInfo(companyId, req.body);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Company info updated successfully",
+      data: result,
+    });
+  },
+);
+
 export const profileController = {
   updateCompanyProfile,
   getCompanyProfile,
   getCompanyInfo,
+  updateCompanyInfo,
 };
