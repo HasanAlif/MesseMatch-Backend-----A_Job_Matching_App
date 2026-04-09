@@ -4,6 +4,22 @@ import httpStatus from "http-status";
 import { User, UserRole } from "../../models";
 import { fileUploader } from "../../../helpars/fileUploader";
 
+const getCompanyProfile = async (companyId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const company = await User.findById(companyId).select(
+    "fullName mobileNumber profilePicture",
+  );
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  return company;
+};
+
 const updateCompanyProfile = async (
   companyId: string,
   payload: {
@@ -81,4 +97,5 @@ const updateCompanyProfile = async (
 
 export const profileService = {
   updateCompanyProfile,
+  getCompanyProfile,
 };

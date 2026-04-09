@@ -5,6 +5,21 @@ import sendResponse from "../../../shared/sendResponse";
 import catchAsync from "../../../shared/catchAsync";
 import { profileService } from "./profile.service";
 
+const getCompanyProfile = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+
+    const result = await profileService.getCompanyProfile(companyId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Company profile retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 const updateCompanyProfile = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const companyId = req.user?.id as string;
@@ -27,4 +42,5 @@ const updateCompanyProfile = catchAsync(
 
 export const profileController = {
   updateCompanyProfile,
+  getCompanyProfile,
 };

@@ -8,6 +8,12 @@ import { fileUploader } from "../../../helpars/fileUploader";
 
 const router = express.Router();
 
+router.get(
+  "/company",
+  auth(UserRole.COMPANY),
+  profileController.getCompanyProfile,
+);
+
 router.patch(
   "/company",
   auth(UserRole.COMPANY),
