@@ -57,11 +57,24 @@ interface JobForMatching {
   personNeeded?: number;
   requieredSkills?: string[];
   requiredLanguages?: string[];
+  minimumRate?: number;
+  maximumRate?: number;
   createdBy: mongoose.Types.ObjectId;
 }
 
 interface RequestForJobPayload {
   jobId: string;
+}
+
+interface JobSearchFilterPayload {
+  latitude?: number;
+  longitude?: number;
+  distanceKm?: number;
+  requiredSkills?: string[];
+  minimumRate?: number;
+  maximumRate?: number;
+  projectPeriodFrom?: Date;
+  projectPeriodTo?: Date;
 }
 
 interface RequestForJobResponse {
@@ -1079,6 +1092,260 @@ const giveRatingAndReviewToFitterForCompletedJob = async (
   };
 };
 
+const validateActiveFitter = async (
+  fitterId: string,
+): Promise<mongoose.Types.ObjectId> => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+
+  const fitterObjectId = new mongoose.Types.ObjectId(fitterId);
+
+  const fitter = await User.findById(fitterObjectId)
+    .select("role status")
+    .lean<{ role?: UserRole; status?: UserStatus }>();
+
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  if (fitter.role !== UserRole.FITTER) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "Only fitters can access this resource",
+    );
+  }
+
+  if (fitter.status !== UserStatus.ACTIVE) {
+    throw new ApiError(httpStatus.FORBIDDEN, "Fitter account is not active");
+  }
+
+  return fitterObjectId;
+};
+
+interface ResolvedFilters {
+  latitude: number;
+  longitude: number;
+  distanceKm: number;
+  requiredSkills: string[];
+  minimumRate?: number;
+  maximumRate?: number;
+  projectPeriodFrom: Date;
+  projectPeriodTo?: Date;
+}
+
+const resolveFitterFilters = async (
+  fitterId: mongoose.Types.ObjectId,
+  filters: JobSearchFilterPayload,
+): Promise<ResolvedFilters> => {
+  const fitter = await User.findById(fitterId)
+    .select("skills lattitude longitude hourlyRate")
+    .lean<FitterProfile>();
+
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  const latitude = filters.latitude ?? fitter.lattitude;
+  const longitude = filters.longitude ?? fitter.longitude;
+
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Location data required. Please provide latitude/longitude or set profile location",
+    );
+  }
+
+  return {
+    latitude,
+    longitude,
+    distanceKm: filters.distanceKm ?? 500,
+    requiredSkills: filters.requiredSkills ?? fitter.skills ?? [],
+    minimumRate: filters.minimumRate ?? fitter.hourlyRate,
+    maximumRate: filters.maximumRate,
+    projectPeriodFrom: filters.projectPeriodFrom ?? new Date(),
+    projectPeriodTo: filters.projectPeriodTo,
+  };
+};
+
+const searchAndFilterJobs = async (
+  userId: string,
+  filters: JobSearchFilterPayload,
+): Promise<MatchingResponse> => {
+  const fitterId = await validateActiveFitter(userId);
+  const resolved = await resolveFitterFilters(fitterId, filters);
+
+  const jobs = await Job.find({ jobStatus: JobStatus.ACTIVE })
+    .select(
+      "projectPicture projectName projectLocation projectPeriodFrom projectPeriodTo personNeeded requieredSkills minimumRate maximumRate createdBy",
+    )
+    .lean<JobForMatching[]>();
+
+  if (!jobs.length) {
+    return { MatchingJobs: [] };
+  }
+
+  const companyIds = [
+    ...new Set(jobs.map((job) => job.createdBy.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const companies = await User.find({
+    _id: { $in: companyIds },
+    role: UserRole.COMPANY,
+    status: UserStatus.ACTIVE,
+  })
+    .select("companyName lattitude longitude")
+    .lean<CompanyProfile[]>();
+
+  const companyMap = new Map(
+    companies.map((company) => [company._id.toString(), company]),
+  );
+
+  const resolvedSkills = normalizeTextArray(resolved.requiredSkills);
+
+  const matchingJobs = jobs
+    .reduce<FitterMatchingJob[]>((acc, job) => {
+      const company = companyMap.get(job.createdBy.toString());
+
+      if (!company) {
+        return acc;
+      }
+
+      const hasCoordinates =
+        typeof resolved.latitude === "number" &&
+        typeof resolved.longitude === "number" &&
+        typeof company.lattitude === "number" &&
+        typeof company.longitude === "number";
+
+      const distanceKm = hasCoordinates
+        ? haversineDistance(
+            resolved.latitude,
+            resolved.longitude,
+            company.lattitude as number,
+            company.longitude as number,
+          )
+        : undefined;
+
+      // Distance filter
+      if (typeof distanceKm === "number" && distanceKm > resolved.distanceKm) {
+        return acc;
+      }
+
+      // Skills filter
+      const jobSkills = normalizeTextArray(job.requieredSkills);
+      const skillsScore = calculateOverlapScore(jobSkills, resolvedSkills);
+
+      if (skillsScore <= MATCHING_CONFIG.MINIMUM_SCORE_PERCENT) {
+        return acc;
+      }
+
+      // Rate filter - ensure job rate range meets fitter's rate requirements
+      const jobMinRate = job.minimumRate ?? 0;
+      const jobMaxRate = job.maximumRate ?? Number.MAX_VALUE;
+
+      // If fitter specified a minimum rate they want to work for
+      if (
+        resolved.minimumRate !== undefined &&
+        jobMaxRate < resolved.minimumRate
+      ) {
+        return acc; // job's max rate is below what fitter wants
+      }
+
+      // If fitter specified a maximum rate they're willing to work for
+      if (
+        resolved.maximumRate !== undefined &&
+        jobMinRate > resolved.maximumRate
+      ) {
+        return acc; // job's min rate is above what fitter is willing to do
+      }
+
+      // Date filter
+      const jobFromDate = job.projectPeriodFrom
+        ? new Date(job.projectPeriodFrom)
+        : undefined;
+      const jobToDate = job.projectPeriodTo
+        ? new Date(job.projectPeriodTo)
+        : undefined;
+      const resolvedFromDate = new Date(resolved.projectPeriodFrom);
+      resolvedFromDate.setHours(0, 0, 0, 0);
+
+      if (jobFromDate) {
+        const jobFromTime = new Date(jobFromDate);
+        jobFromTime.setHours(0, 0, 0, 0);
+
+        if (jobFromTime > resolvedFromDate) {
+          return acc;
+        }
+      }
+
+      if (resolved.projectPeriodTo && jobToDate) {
+        const resolvedToDate = new Date(resolved.projectPeriodTo);
+        resolvedToDate.setHours(0, 0, 0, 0);
+
+        const jobToTime = new Date(jobToDate);
+        jobToTime.setHours(0, 0, 0, 0);
+
+        if (jobToTime > resolvedToDate) {
+          return acc;
+        }
+      }
+
+      // Calculate match score
+      const distanceScore = calculateDistanceScore(distanceKm);
+      const finalScore =
+        skillsScore * MATCHING_CONFIG.WEIGHTS.skills +
+        distanceScore * MATCHING_CONFIG.WEIGHTS.distance;
+
+      const matchScore = roundToTwo(finalScore);
+
+      if (matchScore <= MATCHING_CONFIG.MINIMUM_SCORE_PERCENT) {
+        return acc;
+      }
+
+      acc.push({
+        jobId: job._id.toString(),
+        projectPicture: job.projectPicture,
+        projectName: job.projectName,
+        companyName: company.companyName ?? "Unknown Company",
+        projectLocation: job.projectLocation,
+        projectPeriod: formatProjectPeriod(
+          job.projectPeriodFrom,
+          job.projectPeriodTo,
+        ),
+        personNeeded: job.personNeeded,
+        requieredSkills: job.requieredSkills ?? [],
+        distance:
+          typeof distanceKm === "number" ? roundToTwo(distanceKm) : undefined,
+        matchScore,
+      });
+
+      return acc;
+    }, [])
+    .sort((a, b) => {
+      if (b.matchScore !== a.matchScore) {
+        return b.matchScore - a.matchScore;
+      }
+
+      if (typeof a.distance === "number" && typeof b.distance === "number") {
+        return a.distance - b.distance;
+      }
+
+      if (typeof a.distance === "number") {
+        return -1;
+      }
+
+      if (typeof b.distance === "number") {
+        return 1;
+      }
+
+      return 0;
+    });
+
+  return {
+    MatchingJobs: matchingJobs,
+  };
+};
+
 export const matchingService = {
   matchingForFitter,
   requestForJob,
@@ -1088,4 +1355,5 @@ export const matchingService = {
   completeJobRequestForCompany,
   getCompletedJobRequestsForCompany,
   giveRatingAndReviewToFitterForCompletedJob,
+  searchAndFilterJobs,
 };

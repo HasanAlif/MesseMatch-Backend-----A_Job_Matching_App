@@ -14,6 +14,13 @@ router.get(
 );
 
 router.post(
+  "/search-filter",
+  auth(UserRole.FITTER),
+  validateRequest(matchingValidation.searchAndFilterJobsSchema),
+  matchingController.searchAndFilterJobs,
+);
+
+router.post(
   "/request",
   auth(UserRole.FITTER),
   validateRequest(matchingValidation.requestForJobSchema),

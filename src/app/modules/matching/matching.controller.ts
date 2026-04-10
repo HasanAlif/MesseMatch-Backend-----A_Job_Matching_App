@@ -146,6 +146,20 @@ const giveRatingAndReviewToFitter = catchAsync(
   },
 );
 
+const searchAndFilterJobs = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const userId = req.user?.id as string;
+    const result = await matchingService.searchAndFilterJobs(userId, req.body);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Jobs retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const matchingController = {
   getMatchingJobsForFitter,
   requestForJob,
@@ -155,4 +169,5 @@ export const matchingController = {
   completeJobRequestForCompany,
   getCompletedJobRequestsForCompany,
   giveRatingAndReviewToFitter,
+  searchAndFilterJobs,
 };
