@@ -20,6 +20,12 @@ router.get(
   matchingController.searchAndFilterJobs,
 );
 
+router.get(
+  "/fitter/requests",
+  auth(UserRole.FITTER),
+  matchingController.getRequestedJobsForFitter,
+);
+
 router.post(
   "/request",
   auth(UserRole.FITTER),
