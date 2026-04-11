@@ -149,7 +149,34 @@ const giveRatingAndReviewToFitter = catchAsync(
 const searchAndFilterJobs = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const userId = req.user?.id as string;
-    const result = await matchingService.searchAndFilterJobs(userId, req.body);
+    const filters = req.query as any;
+
+    const parsedFilters = {
+      ...filters,
+      latitude: filters.latitude ? Number(filters.latitude) : undefined,
+      longitude: filters.longitude ? Number(filters.longitude) : undefined,
+      distanceKm: filters.distanceKm ? Number(filters.distanceKm) : undefined,
+      minimumRate: filters.minimumRate
+        ? Number(filters.minimumRate)
+        : undefined,
+      maximumRate: filters.maximumRate
+        ? Number(filters.maximumRate)
+        : undefined,
+      projectPeriodFrom: filters.projectPeriodFrom
+        ? new Date(filters.projectPeriodFrom)
+        : undefined,
+      projectPeriodTo: filters.projectPeriodTo
+        ? new Date(filters.projectPeriodTo)
+        : undefined,
+      requiredSkills: Array.isArray(filters.requiredSkills)
+        ? filters.requiredSkills
+        : undefined,
+    };
+
+    const result = await matchingService.searchAndFilterJobs(
+      userId,
+      parsedFilters,
+    );
 
     sendResponse(res, {
       statusCode: httpStatus.OK,

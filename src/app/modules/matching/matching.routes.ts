@@ -13,7 +13,7 @@ router.get(
   matchingController.getMatchingJobsForFitter,
 );
 
-router.post(
+router.get(
   "/search-filter",
   auth(UserRole.FITTER),
   validateRequest(matchingValidation.searchAndFilterJobsSchema),
