@@ -226,6 +226,61 @@ interface GiveRatingAndReviewResponse {
   updatedFitterRating: number;
 }
 
+interface RequestedCompanyProfile {
+  _id: mongoose.Types.ObjectId;
+  companyName?: string;
+  profilePicture?: string;
+}
+
+interface JobForRequestedLookup {
+  _id: mongoose.Types.ObjectId;
+  projectPicture?: string;
+  projectName: string;
+  projectLocation?: string;
+  projectPeriodFrom?: Date;
+  projectPeriodTo?: Date;
+  personNeeded?: number;
+  requieredSkills?: string[];
+  minimumRate?: number;
+  maximumRate?: number;
+}
+
+interface JobRequestForFitter {
+  _id: mongoose.Types.ObjectId;
+  jobId: mongoose.Types.ObjectId;
+  companyId: mongoose.Types.ObjectId;
+  fitterId: mongoose.Types.ObjectId;
+  distance?: number;
+  hourlyRate?: number;
+  dailyRate?: number;
+  requestStatus: JobRequestStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface FitterRequestedActiveJob {
+  requestId: string;
+  companyId: string;
+  companyName: string | null;
+  profilePicture: string | null;
+  projectPicture: string | null;
+  projectName: string | null;
+  projectLocation: string | null;
+  personNeeded: number | null;
+  requieredSkills: string[] | null;
+  hourlyRate: number | null;
+  dailyRate: number | null;
+  days: number | null;
+  dateRange: string | null;
+  requestStatus: JobRequestStatus | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface RequestedJobsResponse {
+  requestedJobs: FitterRequestedActiveJob[];
+}
+
 const normalizeTextArray = (values?: string[]): string[] => {
   if (!values || !values.length) {
     return [];
@@ -1346,6 +1401,95 @@ const searchAndFilterJobs = async (
   };
 };
 
+const getRequestedJobsForFitter = async (
+  fitterId: string,
+  filters?: { requestStatus?: JobRequestStatus },
+): Promise<RequestedJobsResponse> => {
+  const fitterObjectId = await validateActiveFitter(fitterId);
+
+  const query: Record<string, unknown> = {
+    fitterId: fitterObjectId,
+  };
+
+  if (filters?.requestStatus) {
+    query.requestStatus = filters.requestStatus;
+  }
+
+  const requests = await JobRequest.find(query)
+    .sort({ createdAt: -1 })
+    .lean<JobRequestForFitter[]>();
+
+  if (!requests.length) {
+    return { requestedJobs: [] };
+  }
+
+  const jobIds = [
+    ...new Set(requests.map((request) => request.jobId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const companyIds = [
+    ...new Set(requests.map((request) => request.companyId.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const [jobs, companies] = await Promise.all([
+    Job.find({ _id: { $in: jobIds } })
+      .select(
+        "projectPicture projectName projectLocation projectPeriodFrom projectPeriodTo personNeeded requieredSkills minimumRate maximumRate",
+      )
+      .lean<JobForRequestedLookup[]>(),
+    User.find({ _id: { $in: companyIds } })
+      .select("companyName profilePicture")
+      .lean<RequestedCompanyProfile[]>(),
+  ]);
+
+  const jobMap = new Map(jobs.map((job) => [job._id.toString(), job]));
+  const companyMap = new Map(
+    companies.map((company) => [company._id.toString(), company]),
+  );
+
+  return {
+    requestedJobs: requests.map((request) => {
+      const job = jobMap.get(request.jobId.toString());
+      const company = companyMap.get(request.companyId.toString());
+
+      const dateRange = formatProjectPeriod(
+        job?.projectPeriodFrom,
+        job?.projectPeriodTo,
+      );
+
+      const days = calculateDaysBetween(
+        job?.projectPeriodFrom,
+        job?.projectPeriodTo,
+      );
+
+      return {
+        requestId: request._id.toString(),
+        companyId: request.companyId.toString(),
+        companyName: company?.companyName ?? null,
+        projectName: job?.projectName ?? null,
+        projectPicture: job?.projectPicture ?? null,
+        profilePicture: company?.profilePicture ?? null,
+        projectLocation: job?.projectLocation ?? null,
+        days: typeof days === "number" ? days : null,
+        hourlyRate:
+          typeof request.hourlyRate === "number" ? request.hourlyRate : null,
+        dailyRate:
+          typeof request.dailyRate === "number" ? request.dailyRate : null,
+        personNeeded:
+          typeof job?.personNeeded === "number" ? job.personNeeded : null,
+        dateRange: dateRange ?? null,
+        requieredSkills:
+          job?.requieredSkills && job.requieredSkills.length > 0
+            ? job.requieredSkills
+            : null,
+        requestStatus: request.requestStatus ?? null,
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+      };
+    }),
+  };
+};
+
 export const matchingService = {
   matchingForFitter,
   requestForJob,
@@ -1356,4 +1500,5 @@ export const matchingService = {
   getCompletedJobRequestsForCompany,
   giveRatingAndReviewToFitterForCompletedJob,
   searchAndFilterJobs,
+  getRequestedJobsForFitter,
 };
