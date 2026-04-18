@@ -101,6 +101,21 @@ const getFitterProfile = catchAsync(
   },
 );
 
+const getFitterProfileForUpdate = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const fitterId = req.user?.id as string;
+
+    const result = await profileService.getFitterProfileForUpdate(fitterId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Fitter profile for update retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const profileController = {
   updateCompanyProfile,
   getCompanyProfile,
@@ -108,4 +123,5 @@ export const profileController = {
   updateCompanyInfo,
   changePassword,
   getFitterProfile,
+  getFitterProfileForUpdate,
 };

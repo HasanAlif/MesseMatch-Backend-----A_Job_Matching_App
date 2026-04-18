@@ -239,6 +239,39 @@ const getFitterProfile = async (fitterId: string) => {
   };
 };
 
+const getFitterProfileForUpdate = async (fitterId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+
+  const fitter = await User.findById(fitterId)
+    .select(
+      "role profilePicture fullName userName mobileNumber postalCode workLocations hourlyRate dailyRate experienceYears bio",
+    )
+    .lean();
+
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  if (fitter.role !== UserRole.FITTER) {
+    throw new ApiError(httpStatus.FORBIDDEN, "User is not a fitter");
+  }
+
+  return {
+    profilePicture: fitter.profilePicture,
+    fullName: fitter.fullName,
+    username: fitter.userName,
+    mobileNumber: fitter.mobileNumber,
+    postalCode: fitter.postalCode,
+    workLocations: fitter.workLocations,
+    hourlyRate: fitter.hourlyRate,
+    dailyRate: fitter.dailyRate,
+    experienceYears: fitter.experienceYears,
+    bio: fitter.bio,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -246,4 +279,5 @@ export const profileService = {
   updateCompanyInfo,
   changePassword,
   getFitterProfile,
+  getFitterProfileForUpdate,
 };

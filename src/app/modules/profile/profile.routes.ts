@@ -47,4 +47,10 @@ router.get(
   profileController.getFitterProfile,
 );
 
+router.get(
+  "/fitter/update",
+  auth(UserRole.FITTER),
+  profileController.getFitterProfileForUpdate,
+);
+
 export const profileRoutes = router;
