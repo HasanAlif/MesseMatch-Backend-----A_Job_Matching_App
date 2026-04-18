@@ -53,4 +53,11 @@ router.get(
   profileController.getFitterProfileForUpdate,
 );
 
+router.patch(
+  "/fitter/update",
+  auth(UserRole.FITTER),
+  fileUploader.upload.single("profilePicture"),
+  profileController.updateFitterProfile,
+);
+
 export const profileRoutes = router;

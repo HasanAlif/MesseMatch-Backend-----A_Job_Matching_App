@@ -272,6 +272,110 @@ const getFitterProfileForUpdate = async (fitterId: string) => {
   };
 };
 
+const updateFitterProfile = async (
+  fitterId: string,
+  payload: {
+    profilePictureFile?: Express.Multer.File;
+    fullName?: string;
+    userName?: string;
+    mobileNumber?: string;
+    postalCode?: string;
+    workLocations?: string[];
+    hourlyRate?: number;
+    dailyRate?: number;
+    experienceYears?: number;
+    bio?: string;
+  },
+) => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+
+  const fitter = await User.findById(fitterId);
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  if (fitter.role !== UserRole.FITTER) {
+    throw new ApiError(httpStatus.FORBIDDEN, "User is not a fitter");
+  }
+
+  const updateData: Record<string, unknown> = {};
+
+  if (payload.fullName !== undefined) {
+    updateData.fullName = payload.fullName;
+  }
+  if (payload.userName !== undefined) {
+    updateData.userName = payload.userName;
+  }
+  if (payload.mobileNumber !== undefined) {
+    updateData.mobileNumber = payload.mobileNumber;
+  }
+  if (payload.postalCode !== undefined) {
+    updateData.postalCode = payload.postalCode;
+  }
+  if (payload.workLocations !== undefined) {
+    updateData.workLocations = payload.workLocations;
+  }
+  if (payload.hourlyRate !== undefined) {
+    updateData.hourlyRate = payload.hourlyRate;
+  }
+  if (payload.dailyRate !== undefined) {
+    updateData.dailyRate = payload.dailyRate;
+  }
+  if (payload.experienceYears !== undefined) {
+    updateData.experienceYears = payload.experienceYears;
+  }
+  if (payload.bio !== undefined) {
+    updateData.bio = payload.bio;
+  }
+
+  if (payload.profilePictureFile) {
+    const uploaded = await fileUploader.uploadToCloudinary(
+      payload.profilePictureFile,
+      "messematch/profiles",
+    );
+    updateData.profilePicture = uploaded.Location;
+    updateData.profilePicturePublicId = uploaded.public_id;
+
+    if (fitter.profilePicturePublicId) {
+      fileUploader
+        .deleteFromCloudinary(fitter.profilePicturePublicId)
+        .catch((err) => {
+          console.error("Failed to delete old profile picture:", err);
+        });
+    }
+  }
+
+  const updatedFitter = await User.findByIdAndUpdate(fitterId, updateData, {
+    new: true,
+    runValidators: true,
+  }).select(
+    "role profilePicture fullName userName mobileNumber postalCode workLocations hourlyRate dailyRate experienceYears bio updatedAt",
+  );
+
+  if (!updatedFitter) {
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Failed to update profile",
+    );
+  }
+
+  return {
+    profilePicture: updatedFitter.profilePicture,
+    fullName: updatedFitter.fullName,
+    username: updatedFitter.userName,
+    mobileNumber: updatedFitter.mobileNumber,
+    postalCode: updatedFitter.postalCode,
+    workLocations: updatedFitter.workLocations,
+    hourlyRate: updatedFitter.hourlyRate,
+    dailyRate: updatedFitter.dailyRate,
+    experienceYears: updatedFitter.experienceYears,
+    bio: updatedFitter.bio,
+    updatedAt: updatedFitter.updatedAt,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -280,4 +384,5 @@ export const profileService = {
   changePassword,
   getFitterProfile,
   getFitterProfileForUpdate,
+  updateFitterProfile,
 };

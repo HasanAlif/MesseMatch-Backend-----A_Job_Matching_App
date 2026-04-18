@@ -116,6 +116,25 @@ const getFitterProfileForUpdate = catchAsync(
   },
 );
 
+const updateFitterProfile = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const fitterId = req.user?.id as string;
+    const profilePictureFile = req.file;
+
+    const result = await profileService.updateFitterProfile(fitterId, {
+      ...req.body,
+      profilePictureFile,
+    });
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Fitter profile updated successfully",
+      data: result,
+    });
+  },
+);
+
 export const profileController = {
   updateCompanyProfile,
   getCompanyProfile,
@@ -124,4 +143,5 @@ export const profileController = {
   changePassword,
   getFitterProfile,
   getFitterProfileForUpdate,
+  updateFitterProfile,
 };
