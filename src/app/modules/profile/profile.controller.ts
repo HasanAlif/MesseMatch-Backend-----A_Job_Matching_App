@@ -135,6 +135,23 @@ const updateFitterProfile = catchAsync(
   },
 );
 
+const getSkillsLanguagesAndLicensesForUpdate = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const fitterId = req.user?.id as string;
+
+    const result =
+      await profileService.getSkillsLanguagesAndLicensesForUpdate(fitterId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message:
+        "Fitter skills, languages, and licenses for update retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const profileController = {
   updateCompanyProfile,
   getCompanyProfile,
@@ -144,4 +161,5 @@ export const profileController = {
   getFitterProfile,
   getFitterProfileForUpdate,
   updateFitterProfile,
+  getSkillsLanguagesAndLicensesForUpdate,
 };

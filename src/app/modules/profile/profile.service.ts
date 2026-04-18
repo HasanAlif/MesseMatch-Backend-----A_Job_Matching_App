@@ -376,6 +376,25 @@ const updateFitterProfile = async (
   };
 };
 
+const getSkillsLanguagesAndLicensesForUpdate = async (fitterId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+  const fitter = await User.findById(fitterId)
+    .select("role skills spokenLanguages driversLicense")
+    .lean();
+
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  return {
+    skills: fitter.skills,
+    spokenLanguages: fitter.spokenLanguages,
+    driversLicense: fitter.driversLicense,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -385,4 +404,5 @@ export const profileService = {
   getFitterProfile,
   getFitterProfileForUpdate,
   updateFitterProfile,
+  getSkillsLanguagesAndLicensesForUpdate,
 };

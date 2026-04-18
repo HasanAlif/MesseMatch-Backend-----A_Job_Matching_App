@@ -60,4 +60,10 @@ router.patch(
   profileController.updateFitterProfile,
 );
 
+router.get(
+  "/fitter/skills-languages-licenses/update",
+  auth(UserRole.FITTER),
+  profileController.getSkillsLanguagesAndLicensesForUpdate,
+);
+
 export const profileRoutes = router;
