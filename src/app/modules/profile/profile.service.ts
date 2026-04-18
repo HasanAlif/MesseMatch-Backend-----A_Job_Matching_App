@@ -4,6 +4,8 @@ import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { User, UserRole } from "../../models";
 import { fileUploader } from "../../../helpars/fileUploader";
+import e from "express";
+import { pl } from "zod/v4/locales";
 
 const getCompanyProfile = async (companyId: string) => {
   if (!mongoose.Types.ObjectId.isValid(companyId)) {
@@ -202,10 +204,46 @@ const changePassword = async (
   return { message: "Password changed successfully" };
 };
 
+const getFitterProfile = async (fitterId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+
+  const fitter = await User.findById(fitterId)
+    .select(
+      "role fullName profilePicture workLocations skills spokenLanguages hourlyRate dailyRate experienceYears bio rating jobCompleted plan",
+    )
+    .lean();
+
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  if (fitter.role !== UserRole.FITTER) {
+    throw new ApiError(httpStatus.FORBIDDEN, "User is not a fitter");
+  }
+
+  return {
+    fullName: fitter.fullName,
+    profilePicture: fitter.profilePicture,
+    rating: fitter.rating,
+    jobCompleted: fitter.jobCompleted,
+    workLocations: fitter.workLocations,
+    hourlyRate: fitter.hourlyRate,
+    dailyRate: fitter.dailyRate,
+    experienceYears: fitter.experienceYears,
+    plan: fitter.plan,
+    bio: fitter.bio,
+    skills: fitter.skills,
+    spokenLanguages: fitter.spokenLanguages,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
   getCompanyInfo,
   updateCompanyInfo,
   changePassword,
+  getFitterProfile,
 };

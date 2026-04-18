@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import config from "../config";
 import dns from "dns";
 import { User, UserRole } from "../app/models";
+import { migrateJobRequestIndexes } from "../app/modules/job/jobRequest.model";
 import bcrypt from "bcrypt";
 
 dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
@@ -13,6 +14,9 @@ async function connectMongoDB() {
       heartbeatFrequencyMS: 2000,
     });
     console.log("MongoDB connected successfully!");
+
+    // Migrate JobRequest indexes (drop old unique index, create new ones)
+    await migrateJobRequestIndexes();
 
     // await initiateSuperAdmin();
   } catch (error) {

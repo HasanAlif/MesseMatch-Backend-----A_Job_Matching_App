@@ -41,4 +41,10 @@ router.post(
   profileController.changePassword,
 );
 
+router.get(
+  "/fitter",
+  auth(UserRole.FITTER),
+  profileController.getFitterProfile,
+);
+
 export const profileRoutes = router;

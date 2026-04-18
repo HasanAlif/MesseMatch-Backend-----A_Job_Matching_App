@@ -26,6 +26,7 @@ export interface IJobRequest extends Document {
   companyRating?: number;
   companyReview?: string;
   reviewedAt?: Date;
+  rejectedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -99,13 +100,19 @@ const JobRequestSchema = new Schema<IJobRequest>(
     reviewedAt: {
       type: Date,
     },
+    rejectedAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
   },
 );
 
-JobRequestSchema.index({ jobId: 1, fitterId: 1 }, { unique: true });
+JobRequestSchema.index(
+  { jobId: 1, fitterId: 1, requestStatus: 1 },
+  { name: "idx_active_requests" },
+);
 JobRequestSchema.index({ companyId: 1, requestStatus: 1, createdAt: -1 });
 JobRequestSchema.index({ fitterId: 1, createdAt: -1 });
 
@@ -113,3 +120,13 @@ export const JobRequest = mongoose.model<IJobRequest>(
   "JobRequest",
   JobRequestSchema,
 );
+
+export const migrateJobRequestIndexes = async () => {
+  try {
+    const collection = JobRequest.collection;
+    await collection.dropIndex("jobId_1_fitterId_1").catch(() => {});
+    await JobRequest.syncIndexes();
+  } catch (error) {
+    console.error("Error migrating JobRequest indexes:", error);
+  }
+};

@@ -620,6 +620,9 @@ const requestForJob = async (
   const existingRequest = await JobRequest.findOne({
     jobId: jobObjectId,
     fitterId: fitterObjectId,
+    requestStatus: {
+      $in: [JobRequestStatus.REQUESTED, JobRequestStatus.ACCEPTED],
+    },
   })
     .select("_id")
     .lean();
@@ -629,6 +632,34 @@ const requestForJob = async (
       httpStatus.CONFLICT,
       "You have already requested this job",
     );
+  }
+
+  // Check for recent rejection (cooldown period)
+  const lastRejection = await JobRequest.findOne({
+    jobId: jobObjectId,
+    fitterId: fitterObjectId,
+    requestStatus: JobRequestStatus.REJECTED,
+  })
+    .sort({ rejectedAt: -1 })
+    .select("rejectedAt updatedAt")
+    .lean();
+
+  if (lastRejection) {
+    const rejectionDate = lastRejection.rejectedAt || lastRejection.updatedAt;
+    const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const timeSinceRejection = Date.now() - rejectionDate.getTime();
+
+    if (timeSinceRejection < ONE_MONTH_MS) {
+      const retryDate = new Date(rejectionDate.getTime() + ONE_MONTH_MS);
+      const day = retryDate.getDate();
+      const month = retryDate.toLocaleDateString("en-US", { month: "long" });
+      const year = retryDate.getFullYear();
+      const formattedDate = `${day} ${month},${year}`;
+      throw new ApiError(
+        httpStatus.CONFLICT,
+        `You rejected by this job. Try requesting again on ${formattedDate}.`,
+      );
+    }
   }
 
   const hasCoordinates =
@@ -650,34 +681,22 @@ const requestForJob = async (
 
   let createdRequest;
 
-  try {
-    createdRequest = await JobRequest.create({
-      jobId: jobObjectId,
-      companyId: company._id,
-      fitterId: fitterObjectId,
-      profilePicture: fitter.profilePicture,
-      distance,
-      userName: fitter.userName,
-      rating: fitter.rating,
-      jobCompleted: fitter.jobCompleted,
-      workLocations: fitter.workLocations ?? [],
-      hourlyRate: fitter.hourlyRate,
-      dailyRate: fitter.dailyRate,
-      spokenLanguages: fitter.spokenLanguages ?? [],
-      skills: fitter.skills ?? [],
-      requestStatus: JobRequestStatus.REQUESTED,
-    });
-  } catch (error) {
-    const mongoError = error as { code?: number };
-    if (mongoError.code === 11000) {
-      throw new ApiError(
-        httpStatus.CONFLICT,
-        "You have already requested this job",
-      );
-    }
-
-    throw error;
-  }
+  createdRequest = await JobRequest.create({
+    jobId: jobObjectId,
+    companyId: company._id,
+    fitterId: fitterObjectId,
+    profilePicture: fitter.profilePicture,
+    distance,
+    userName: fitter.userName,
+    rating: fitter.rating,
+    jobCompleted: fitter.jobCompleted,
+    workLocations: fitter.workLocations ?? [],
+    hourlyRate: fitter.hourlyRate,
+    dailyRate: fitter.dailyRate,
+    spokenLanguages: fitter.spokenLanguages ?? [],
+    skills: fitter.skills ?? [],
+    requestStatus: JobRequestStatus.REQUESTED,
+  });
 
   return {
     requestId: createdRequest._id.toString(),
@@ -809,6 +828,9 @@ const updateRequestStatusForCompany = async (
   }
 
   existingRequest.requestStatus = payload.requestStatus;
+  if (payload.requestStatus === JobRequestStatus.REJECTED) {
+    existingRequest.rejectedAt = new Date();
+  }
   const updatedRequest = await existingRequest.save();
 
   return {
@@ -955,6 +977,12 @@ const completeJobRequestForCompany = async (
 
   existingRequest.requestStatus = JobRequestStatus.COMPLETED;
   await existingRequest.save();
+
+  await User.findByIdAndUpdate(
+    existingRequest.fitterId,
+    { $inc: { jobCompleted: 1 } },
+    { new: true },
+  );
 };
 
 const getCompletedJobRequestsForCompany = async (
