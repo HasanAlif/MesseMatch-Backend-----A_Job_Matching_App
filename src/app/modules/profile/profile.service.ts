@@ -395,6 +395,59 @@ const getSkillsLanguagesAndLicensesForUpdate = async (fitterId: string) => {
   };
 };
 
+const updateSkillsLanguagesAndLicenses = async (
+  fitterId: string,
+  payload: {
+    skills?: string[];
+    spokenLanguages?: string[];
+    driversLicense?: string;
+  },
+) => {
+  if (!mongoose.Types.ObjectId.isValid(fitterId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
+  }
+
+  const fitter = await User.findById(fitterId);
+  if (!fitter) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  if (fitter.role !== UserRole.FITTER) {
+    throw new ApiError(httpStatus.FORBIDDEN, "User is not a fitter");
+  }
+
+  const updateData: Record<string, unknown> = {};
+
+  if (payload.skills !== undefined) {
+    updateData.skills = payload.skills;
+  }
+  if (payload.spokenLanguages !== undefined) {
+    updateData.spokenLanguages = payload.spokenLanguages;
+  }
+  if (payload.driversLicense !== undefined) {
+    updateData.driversLicense = payload.driversLicense;
+  }
+
+  const updatedFitter = await User.findByIdAndUpdate(fitterId, updateData, {
+    new: true,
+    runValidators: true,
+  }).select("skills spokenLanguages driversLicense updatedAt");
+
+  if (!updatedFitter) {
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Failed to update profile",
+    );
+  }
+
+  return {
+    skills: updatedFitter.skills,
+    spokenLanguages: updatedFitter.spokenLanguages,
+    driversLicense: updatedFitter.driversLicense,
+    updatedAt: updatedFitter.updatedAt,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -405,4 +458,5 @@ export const profileService = {
   getFitterProfileForUpdate,
   updateFitterProfile,
   getSkillsLanguagesAndLicensesForUpdate,
+  updateSkillsLanguagesAndLicenses,
 };

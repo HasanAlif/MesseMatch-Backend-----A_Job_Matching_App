@@ -66,4 +66,11 @@ router.get(
   profileController.getSkillsLanguagesAndLicensesForUpdate,
 );
 
+router.patch(
+  "/fitter/skills-languages-licenses/update",
+  auth(UserRole.FITTER),
+  validateRequest(profileValidation.updateSkillsLanguagesAndLicensesSchema),
+  profileController.updateSkillsLanguagesAndLicenses,
+);
+
 export const profileRoutes = router;

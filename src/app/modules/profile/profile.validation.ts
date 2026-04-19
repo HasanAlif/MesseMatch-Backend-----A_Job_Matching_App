@@ -28,7 +28,14 @@ const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
+const updateSkillsLanguagesAndLicensesSchema = z.object({
+  skills: z.array(z.string()).optional(),
+  spokenLanguages: z.array(z.string()).optional(),
+  driversLicense: z.string().optional(),
+});
+
 export const profileValidation = {
   updateCompanyProfileSchema,
   changePasswordSchema,
+  updateSkillsLanguagesAndLicensesSchema,
 };
