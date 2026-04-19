@@ -6,6 +6,7 @@ import { notificationRoutes } from "../modules/notification/notification.routes"
 import { messageRoutes } from "../modules/message/message.routes";
 import { matchingRoutes } from "../modules/matching/matching.routes";
 import { profileRoutes } from "../modules/profile/profile.routes";
+import { appContentRoutes } from "../modules/admin/appContent.route";
 
 const router = express.Router();
 
@@ -37,8 +38,11 @@ const moduleRoutes = [
   {
     path: "/profile",
     route: profileRoutes,
-
-  }
+  },
+  {
+    path: "/app-content",
+    route: appContentRoutes,
+  },
 ];
 
 moduleRoutes.forEach((route) => router.use(route.path, route.route));
