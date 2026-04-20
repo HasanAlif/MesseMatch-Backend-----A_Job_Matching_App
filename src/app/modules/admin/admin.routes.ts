@@ -20,4 +20,11 @@ router.get(
   adminController.getRecentUsers,
 );
 
+router.get(
+  "/users",
+  auth(UserRole.ADMIN),
+  validateRequest(adminValidation.getAllUsersSchema),
+  adminController.getAllUsers,
+);
+
 export const adminRoutes = router;

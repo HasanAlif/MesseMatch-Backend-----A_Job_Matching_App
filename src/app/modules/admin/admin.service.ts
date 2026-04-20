@@ -3,6 +3,7 @@ import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { AppContent, ContentType } from "./appContent.model";
 import { User } from "../../models";
+import { paginationHelper } from "../../../helpars/paginationHelper";
 
 const getContentTypeName = (type: ContentType): string => {
   const typeNames: Record<ContentType, string> = {
@@ -109,10 +110,96 @@ const getRecentUsers = async () => {
   }));
 };
 
+const getAllUsers = async (status?: string, page?: number, limit?: number) => {
+  const query: Record<string, unknown> = {};
+
+  if (status) {
+    query.status = status;
+  }
+
+  const total = await User.countDocuments(query);
+
+  const hasPagination = page !== undefined || limit !== undefined;
+
+  let users;
+  if (hasPagination) {
+    const paginationData = paginationHelper.calculatePagination({
+      page,
+      limit,
+    });
+
+    users = await User.find(query, {
+      fullName: 1,
+      email: 1,
+      profilePicture: 1,
+      mobileNumber: 1,
+      country: 1,
+      plan: 1,
+      role: 1,
+      status: 1,
+    })
+      .sort({ createdAt: -1 })
+      .skip(paginationData.skip)
+      .limit(paginationData.limit)
+      .lean();
+
+    const formattedUsers = users.map((user) => ({
+      profilePicture: user.profilePicture || null,
+      name: user.fullName || null,
+      email: user.email || null,
+      phoneNumber: user.mobileNumber || null,
+      role: user.role || null,
+      status: user.status || null,
+    }));
+
+    return {
+      meta: {
+        page: paginationData.page,
+        limit: paginationData.limit,
+        total,
+        totalPages: Math.ceil(total / paginationData.limit),
+      },
+      data: formattedUsers,
+    };
+  }
+
+  users = await User.find(query, {
+    fullName: 1,
+    email: 1,
+    profilePicture: 1,
+    mobileNumber: 1,
+    country: 1,
+    role: 1,
+    status: 1,
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const formattedUsers = users.map((user) => ({
+    profilePicture: user.profilePicture || null,
+    name: user.fullName || null,
+    email: user.email || null,
+    phoneNumber: user.mobileNumber || null,
+    role: user.role || null,
+    status: user.status || null,
+  }));
+
+  return {
+    meta: {
+      page: 1,
+      limit: total,
+      total,
+      totalPages: 1,
+    },
+    data: formattedUsers,
+  };
+};
+
 export const adminService = {
   getContentTypeName,
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
   getRecentUsers,
+  getAllUsers,
 };

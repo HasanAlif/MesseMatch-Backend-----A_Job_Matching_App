@@ -77,9 +77,28 @@ const getRecentUsers = catchAsync(
   },
 );
 
+const getAllUsers = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const status = (req.query.status as string) || undefined;
+    const page = (req.query.page as unknown as number) || 1;
+    const limit = (req.query.limit as unknown as number) || 10;
+
+    const result = await adminService.getAllUsers(status, page, limit);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Users retrieved successfully",
+      meta: result.meta,
+      data: result.data,
+    });
+  },
+);
+
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
   getRecentUsers,
+  getAllUsers,
 };

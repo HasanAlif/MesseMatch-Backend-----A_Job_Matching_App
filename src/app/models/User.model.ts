@@ -9,7 +9,6 @@ export enum UserRole {
 export enum UserStatus {
   ACTIVE = "ACTIVE",
   SUSPEND = "SUSPEND",
-  BLOCKED = "BLOCKED",
 }
 
 export enum AuthProvider {

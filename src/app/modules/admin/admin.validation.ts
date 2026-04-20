@@ -14,6 +14,29 @@ const getMonthlyUserGrowthSchema = z.object({
     .optional(),
 });
 
+const getAllUsersSchema = z.object({
+  query: z
+    .object({
+      plan: z.string().optional(),
+      status: z.string().optional(),
+      page: z.coerce
+        .number()
+        .int()
+        .min(1, "Page must be at least 1")
+        .optional()
+        .default(1),
+      limit: z.coerce
+        .number()
+        .int()
+        .min(1, "Limit must be at least 1")
+        .max(100, "Limit must not exceed 100")
+        .optional()
+        .default(10),
+    })
+    .optional(),
+});
+
 export const adminValidation = {
   getMonthlyUserGrowthSchema,
+  getAllUsersSchema,
 };
