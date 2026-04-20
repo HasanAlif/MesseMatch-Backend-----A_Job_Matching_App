@@ -95,10 +95,33 @@ const getAllUsers = catchAsync(
   },
 );
 
+const searchUsers = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const { searchQuery } = req.query;
+    const page = (req.query.page as unknown as number) || 1;
+    const limit = (req.query.limit as unknown as number) || 10;
+
+    const result = await adminService.searchUsers(
+      searchQuery as string,
+      page,
+      limit,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Users search results retrieved successfully",
+      meta: result.meta,
+      data: result.data,
+    });
+  },
+);
+
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
   getRecentUsers,
   getAllUsers,
+  searchUsers,
 };

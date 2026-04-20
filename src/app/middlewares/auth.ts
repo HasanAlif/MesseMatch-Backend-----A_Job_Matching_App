@@ -4,7 +4,7 @@ import httpStatus from "http-status";
 import config from "../../config";
 import ApiError from "../../errors/ApiErrors";
 import { jwtHelpers } from "../../helpars/jwtHelpers";
-import { User } from "../models";
+import { User, UserStatus } from "../models";
 
 // Extract token from various sources
 const extractToken = (req: Request): string | undefined => {
@@ -52,11 +52,7 @@ const auth = (...roles: string[]) => {
         throw new ApiError(httpStatus.UNAUTHORIZED, "User not found");
       }
 
-      if (user.status === "BLOCKED") {
-        throw new ApiError(httpStatus.FORBIDDEN, "Your account is blocked");
-      }
-
-      if (user.status === "SUSPEND") {
+      if (user.status === UserStatus.SUSPEND) {
         throw new ApiError(httpStatus.FORBIDDEN, "Your account is suspended");
       }
 

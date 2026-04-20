@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { AppContent, ContentType } from "./appContent.model";
-import { User } from "../../models";
+import { User, UserRole } from "../../models";
 import { paginationHelper } from "../../../helpars/paginationHelper";
 
 const getContentTypeName = (type: ContentType): string => {
@@ -133,8 +133,7 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
       email: 1,
       profilePicture: 1,
       mobileNumber: 1,
-      country: 1,
-      plan: 1,
+      createdAt: 1,
       role: 1,
       status: 1,
     })
@@ -143,11 +142,20 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
       .limit(paginationData.limit)
       .lean();
 
+    const formatDate = (date: Date): string => {
+      return date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    };
+
     const formattedUsers = users.map((user) => ({
       profilePicture: user.profilePicture || null,
       name: user.fullName || null,
       email: user.email || null,
       phoneNumber: user.mobileNumber || null,
+      joinedDate: user.createdAt ? formatDate(user.createdAt) : null,
       role: user.role || null,
       status: user.status || null,
     }));
@@ -175,11 +183,20 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
     .sort({ createdAt: -1 })
     .lean();
 
+  const formatDate = (date: Date): string => {
+    return date.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  };
+
   const formattedUsers = users.map((user) => ({
     profilePicture: user.profilePicture || null,
     name: user.fullName || null,
     email: user.email || null,
     phoneNumber: user.mobileNumber || null,
+    joinedDate: user.createdAt ? formatDate(user.createdAt) : null,
     role: user.role || null,
     status: user.status || null,
   }));
@@ -195,6 +212,225 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
   };
 };
 
+const searchUsers = async (
+  searchQuery: string,
+  page?: number,
+  limit?: number,
+) => {
+  const paginationData = paginationHelper.calculatePagination({ page, limit });
+
+  const query = searchQuery?.trim() || "";
+
+  if (!query) {
+    return {
+      meta: {
+        page: paginationData.page,
+        limit: paginationData.limit,
+        total: 0,
+        totalPages: 0,
+      },
+      data: [],
+    };
+  }
+
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const queryLower = query.toLowerCase();
+
+  const pipeline = [
+    {
+      $match: {
+        role: UserRole.FITTER,
+        $or: [
+          { fullName: { $regex: escapedQuery, $options: "i" } },
+          { email: { $regex: escapedQuery, $options: "i" } },
+          { mobileNumber: { $regex: escapedQuery, $options: "i" } },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        relevanceScore: {
+          $add: [
+            {
+              $cond: [
+                {
+                  $eq: [
+                    { $toLower: { $ifNull: ["$fullName", ""] } },
+                    queryLower,
+                  ],
+                },
+                100,
+                0,
+              ],
+            },
+            {
+              $cond: [
+                {
+                  $eq: [{ $toLower: { $ifNull: ["$email", ""] } }, queryLower],
+                },
+                100,
+                0,
+              ],
+            },
+            {
+              $cond: [
+                { $eq: [{ $ifNull: ["$mobileNumber", ""] }, query] },
+                100,
+                0,
+              ],
+            },
+
+            {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: { $ifNull: ["$fullName", ""] },
+                    regex: `^${escapedQuery}`,
+                    options: "i",
+                  },
+                },
+                50,
+                0,
+              ],
+            },
+            {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: { $ifNull: ["$email", ""] },
+                    regex: `^${escapedQuery}`,
+                    options: "i",
+                  },
+                },
+                50,
+                0,
+              ],
+            },
+            {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: { $ifNull: ["$mobileNumber", ""] },
+                    regex: `^${escapedQuery}`,
+                    options: "i",
+                  },
+                },
+                50,
+                0,
+              ],
+            },
+
+            {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: { $ifNull: ["$fullName", ""] },
+                    regex: escapedQuery,
+                    options: "i",
+                  },
+                },
+                10,
+                0,
+              ],
+            },
+            {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: { $ifNull: ["$email", ""] },
+                    regex: escapedQuery,
+                    options: "i",
+                  },
+                },
+                10,
+                0,
+              ],
+            },
+            {
+              $cond: [
+                {
+                  $regexMatch: {
+                    input: { $ifNull: ["$mobileNumber", ""] },
+                    regex: escapedQuery,
+                    options: "i",
+                  },
+                },
+                10,
+                0,
+              ],
+            },
+          ],
+        },
+      },
+    },
+    { $sort: { relevanceScore: -1 as const, createdAt: -1 as const } },
+    {
+      $facet: {
+        metadata: [{ $count: "total" }],
+        data: [
+          { $skip: paginationData.skip },
+          { $limit: paginationData.limit },
+          {
+            $project: {
+              fullName: 1,
+              email: 1,
+              profilePicture: 1,
+              mobileNumber: 1,
+              createdAt: 1,
+              role: 1,
+              status: 1,
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  const [result] = await User.aggregate(pipeline);
+  const total = result?.metadata[0]?.total || 0;
+  const users = result?.data || [];
+
+  const formatDate = (date: Date): string => {
+    return date.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  };
+
+  const formattedUsers = users.map(
+    (user: {
+      _id: string;
+      fullName?: string;
+      email?: string;
+      profilePicture?: string;
+      mobileNumber?: string;
+      role?: string;
+      status?: string;
+      createdAt?: Date;
+    }) => ({
+      id: user._id,
+      profilePicture: user.profilePicture || null,
+      name: user.fullName || null,
+      email: user.email || null,
+      phoneNumber: user.mobileNumber || null,
+      role: user.role || null,
+      joinedDate: user.createdAt ? formatDate(user.createdAt) : null,
+      status: user.status || null,
+    }),
+  );
+
+  return {
+    meta: {
+      page: paginationData.page,
+      limit: paginationData.limit,
+      total,
+      totalPages: Math.ceil(total / paginationData.limit) || 0,
+    },
+    data: formattedUsers,
+  };
+};
+
 export const adminService = {
   getContentTypeName,
   createOrUpdateContent,
@@ -202,4 +438,5 @@ export const adminService = {
   getMonthlyUserGrowth,
   getRecentUsers,
   getAllUsers,
+  searchUsers,
 };

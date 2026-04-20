@@ -27,4 +27,11 @@ router.get(
   adminController.getAllUsers,
 );
 
+router.get(
+  "/users/search",
+  auth(UserRole.ADMIN),
+  validateRequest(adminValidation.searchUsersSchema),
+  adminController.searchUsers,
+);
+
 export const adminRoutes = router;
