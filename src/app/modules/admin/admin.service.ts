@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { AppContent, ContentType } from "./appContent.model";
-import { User, UserRole } from "../../models";
+import { User, UserRole, UserStatus } from "../../models";
 import { paginationHelper } from "../../../helpars/paginationHelper";
 import { fileUploader } from "../../../helpars/fileUploader";
 
@@ -80,6 +80,7 @@ const getRecentUsers = async () => {
       createdAt: { $gte: sevenDaysAgo },
     },
     {
+      _id: 1,
       fullName: 1,
       email: 1,
       profilePicture: 1,
@@ -101,6 +102,7 @@ const getRecentUsers = async () => {
   };
 
   return users.map((user) => ({
+    id: user._id.toString(),
     profilePicture: user.profilePicture || null,
     name: user.fullName || null,
     email: user.email || null,
@@ -130,6 +132,7 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
     });
 
     users = await User.find(query, {
+      _id: 1,
       fullName: 1,
       email: 1,
       profilePicture: 1,
@@ -152,6 +155,7 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
     };
 
     const formattedUsers = users.map((user) => ({
+      id: user._id.toString(),
       profilePicture: user.profilePicture || null,
       name: user.fullName || null,
       email: user.email || null,
@@ -432,6 +436,28 @@ const searchUsers = async (
   };
 };
 
+const changeUserStatus = async (userId: string, newStatus: string) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
+  }
+
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  user.status = newStatus as UserStatus;
+  await user.save();
+
+  return {
+    id: user._id,
+    name: user.fullName,
+    email: user.email,
+    status: user.status,
+  };
+};
+
 const getAdminProfile = async (adminId: string) => {
   if (!mongoose.Types.ObjectId.isValid(adminId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid admin ID");
@@ -517,6 +543,7 @@ export const adminService = {
   getRecentUsers,
   getAllUsers,
   searchUsers,
+  changeUserStatus,
   getAdminProfile,
   updateAdminProfile,
 };

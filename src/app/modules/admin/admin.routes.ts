@@ -35,6 +35,13 @@ router.get(
   adminController.searchUsers,
 );
 
+router.put(
+  "/users/status/:userId",
+  auth(UserRole.ADMIN),
+  validateRequest(adminValidation.changeUserStatusSchema),
+  adminController.changeUserStatus,
+);
+
 router.get("/profile", auth(UserRole.ADMIN), adminController.getAdminProfile);
 
 router.put(

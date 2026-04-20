@@ -69,9 +69,21 @@ const updateAdminProfileSchema = z.object({
     .optional(),
 });
 
+const changeUserStatusSchema = z.object({
+  params: z.object({
+    userId: z.string().length(24, "Invalid user ID format"),
+  }),
+  body: z.object({
+    status: z.enum(["ACTIVE", "SUSPEND"], {
+      errorMap: () => ({ message: "Status must be either ACTIVE or SUSPEND" }),
+    }),
+  }),
+});
+
 export const adminValidation = {
   getMonthlyUserGrowthSchema,
   getAllUsersSchema,
   searchUsersSchema,
+  changeUserStatusSchema,
   updateAdminProfileSchema,
 };

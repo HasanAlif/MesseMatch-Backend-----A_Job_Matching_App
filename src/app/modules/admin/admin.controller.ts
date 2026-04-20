@@ -117,6 +117,22 @@ const searchUsers = catchAsync(
   },
 );
 
+const changeUserStatus = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const { userId } = req.params;
+    const { status } = req.body;
+
+    const result = await adminService.changeUserStatus(userId, status);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "User Status Updated Successfully",
+      data: result,
+    });
+  },
+);
+
 const getAdminProfile = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const adminId = req.user?.id;
@@ -161,4 +177,5 @@ export const adminController = {
   searchUsers,
   getAdminProfile,
   updateAdminProfile,
+  changeUserStatus,
 };
