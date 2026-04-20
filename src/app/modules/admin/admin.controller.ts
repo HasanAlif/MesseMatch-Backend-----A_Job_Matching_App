@@ -117,6 +117,20 @@ const searchUsers = catchAsync(
   },
 );
 
+const getAdminProfile = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const adminId = req.user?.id;
+    const result = await adminService.getAdminProfile(adminId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Admin profile retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
@@ -124,4 +138,5 @@ export const adminController = {
   getRecentUsers,
   getAllUsers,
   searchUsers,
+  getAdminProfile,
 };

@@ -431,6 +431,28 @@ const searchUsers = async (
   };
 };
 
+const getAdminProfile = async (adminId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(adminId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid admin ID");
+  }
+
+  const admin = await User.findById(adminId, {
+    profilePicture: 1,
+    fullName: 1,
+    role: 1,
+  }).lean();
+
+  if (!admin) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Admin not found");
+  }
+
+  return {
+    profilePicture: admin.profilePicture || null,
+    name: admin.fullName || null,
+    role: admin.role || null,
+  };
+};
+
 export const adminService = {
   getContentTypeName,
   createOrUpdateContent,
@@ -439,4 +461,5 @@ export const adminService = {
   getRecentUsers,
   getAllUsers,
   searchUsers,
+  getAdminProfile,
 };
