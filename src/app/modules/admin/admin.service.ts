@@ -69,9 +69,50 @@ const getMonthlyUserGrowth = async (year: number) => {
   return { year, months };
 };
 
+const getRecentUsers = async () => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  const users = await User.find(
+    {
+      createdAt: { $gte: sevenDaysAgo },
+    },
+    {
+      fullName: 1,
+      email: 1,
+      profilePicture: 1,
+      mobileNumber: 1,
+      role: 1,
+      createdAt: 1,
+      status: 1,
+    },
+  )
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const formatDate = (date: Date): string => {
+    return date.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  };
+
+  return users.map((user) => ({
+    profilePicture: user.profilePicture || null,
+    name: user.fullName || null,
+    email: user.email || null,
+    phoneNumber: user.mobileNumber || null,
+    role: user.role || null,
+    joinedDate: user.createdAt ? formatDate(user.createdAt) : null,
+    status: user.status || null,
+  }));
+};
+
 export const adminService = {
   getContentTypeName,
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
+  getRecentUsers,
 };

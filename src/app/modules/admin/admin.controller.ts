@@ -64,8 +64,22 @@ const getMonthlyUserGrowth = catchAsync(
   },
 );
 
+const getRecentUsers = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const result = await adminService.getRecentUsers();
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Recent users retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
+  getRecentUsers,
 };
