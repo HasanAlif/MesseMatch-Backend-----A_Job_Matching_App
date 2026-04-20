@@ -3,6 +3,8 @@ import sendResponse from "../../../shared/sendResponse";
 import catchAsync from "../../../shared/catchAsync";
 import { adminService } from "./admin.service";
 import { ContentType } from "./appContent.model";
+import { Request, Response } from "express";
+import { JwtPayload } from "jsonwebtoken";
 
 const getContentTypeName = (type: string): string => {
   const typeNames: Record<string, string> = {
@@ -47,7 +49,23 @@ const getContentByType = catchAsync(async (req, res) => {
   });
 });
 
+const getMonthlyUserGrowth = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const year =
+      (req.query.year as unknown as number) || new Date().getFullYear();
+    const result = await adminService.getMonthlyUserGrowth(year);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Monthly user growth retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
+  getMonthlyUserGrowth,
 };
