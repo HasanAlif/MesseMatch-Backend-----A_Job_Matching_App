@@ -131,6 +131,27 @@ const getAdminProfile = catchAsync(
   },
 );
 
+const updateAdminProfile = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const adminId = req.user?.id;
+    const { fullName } = req.body;
+    const profilePictureFile = req.file;
+
+    const result = await adminService.updateAdminProfile(
+      adminId,
+      fullName,
+      profilePictureFile,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Admin profile updated successfully",
+      data: result,
+    });
+  },
+);
+
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
@@ -139,4 +160,5 @@ export const adminController = {
   getAllUsers,
   searchUsers,
   getAdminProfile,
+  updateAdminProfile,
 };

@@ -4,6 +4,7 @@ import validateRequest from "../../middlewares/validateRequest";
 import { adminController } from "./admin.controller";
 import { adminValidation } from "./admin.validation";
 import { UserRole } from "../../models";
+import { fileUploader } from "../../../helpars/fileUploader";
 
 const router = express.Router();
 
@@ -35,5 +36,13 @@ router.get(
 );
 
 router.get("/profile", auth(UserRole.ADMIN), adminController.getAdminProfile);
+
+router.put(
+  "/profile",
+  auth(UserRole.ADMIN),
+  fileUploader.upload.single("profilePictureFile"),
+  validateRequest(adminValidation.updateAdminProfileSchema),
+  adminController.updateAdminProfile,
+);
 
 export const adminRoutes = router;

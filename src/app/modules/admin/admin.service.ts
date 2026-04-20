@@ -4,6 +4,7 @@ import httpStatus from "http-status";
 import { AppContent, ContentType } from "./appContent.model";
 import { User, UserRole } from "../../models";
 import { paginationHelper } from "../../../helpars/paginationHelper";
+import { fileUploader } from "../../../helpars/fileUploader";
 
 const getContentTypeName = (type: ContentType): string => {
   const typeNames: Record<ContentType, string> = {
@@ -453,6 +454,61 @@ const getAdminProfile = async (adminId: string) => {
   };
 };
 
+const updateAdminProfile = async (
+  adminId: string,
+  fullName: string | undefined,
+  profilePictureFile?: Express.Multer.File,
+) => {
+  if (!mongoose.Types.ObjectId.isValid(adminId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid admin ID");
+  }
+
+  const admin = await User.findById(adminId);
+
+  if (!admin) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Admin not found");
+  }
+
+  const updateData: Record<string, unknown> = {};
+
+  if (fullName && fullName.trim()) {
+    updateData.fullName = fullName.trim();
+  }
+
+  if (profilePictureFile) {
+    // Upload new profile picture to Cloudinary
+    const uploadedFile =
+      await fileUploader.uploadProfileImage(profilePictureFile);
+    updateData.profilePicture = uploadedFile.Location;
+    updateData.profilePicturePublicId = uploadedFile.public_id;
+
+    // Delete old profile picture from Cloudinary if it exists
+    if (admin.profilePicturePublicId) {
+      await fileUploader.deleteFromCloudinary(admin.profilePicturePublicId);
+    }
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "No data provided for update");
+  }
+
+  const updatedAdmin = await User.findByIdAndUpdate(
+    adminId,
+    { $set: updateData },
+    {
+      new: true,
+      runValidators: true,
+      select: "profilePicture fullName role profilePicturePublicId",
+    },
+  ).lean();
+
+  return {
+    profilePicture: updatedAdmin?.profilePicture || null,
+    name: updatedAdmin?.fullName || null,
+    role: updatedAdmin?.role || null,
+  };
+};
+
 export const adminService = {
   getContentTypeName,
   createOrUpdateContent,
@@ -462,4 +518,5 @@ export const adminService = {
   getAllUsers,
   searchUsers,
   getAdminProfile,
+  updateAdminProfile,
 };

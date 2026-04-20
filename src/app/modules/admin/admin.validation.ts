@@ -57,8 +57,21 @@ const searchUsersSchema = z.object({
     .optional(),
 });
 
+const updateAdminProfileSchema = z.object({
+  body: z
+    .object({
+      fullName: z
+        .string()
+        .min(2, "Full name must be at least 2 characters")
+        .max(100, "Full name must not exceed 100 characters")
+        .optional(),
+    })
+    .optional(),
+});
+
 export const adminValidation = {
   getMonthlyUserGrowthSchema,
   getAllUsersSchema,
   searchUsersSchema,
+  updateAdminProfileSchema,
 };
