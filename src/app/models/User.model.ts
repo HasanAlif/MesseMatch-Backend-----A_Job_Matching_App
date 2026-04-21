@@ -18,6 +18,10 @@ export enum AuthProvider {
 
 export enum Plan {
   FREE = "FREE",
+  PREMIUM_DE = "PREMIUM_DE",
+  PREMIUM_EU = "PREMIUM_EU",
+  LAUNCH_PREMIUM = "LAUNCH_PREMIUM",
+  BASIC = "BASIC",
   PREMIUM = "PREMIUM",
 }
 
