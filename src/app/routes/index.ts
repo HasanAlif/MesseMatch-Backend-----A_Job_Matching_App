@@ -8,6 +8,7 @@ import { matchingRoutes } from "../modules/matching/matching.routes";
 import { profileRoutes } from "../modules/profile/profile.routes";
 import { appContentRoutes } from "../modules/admin/appContent.route";
 import { adminRoutes } from "../modules/admin/admin.routes";
+import { subscriptionRoutes } from "../modules/subscription/subscription.routes";
 
 const router = express.Router();
 
@@ -47,8 +48,11 @@ const moduleRoutes = [
   {
     path: "/admin",
     route: adminRoutes,
-
-  }
+  },
+  {
+    path: "/subscriptions",
+    route: subscriptionRoutes,
+  },
 ];
 
 moduleRoutes.forEach((route) => router.use(route.path, route.route));

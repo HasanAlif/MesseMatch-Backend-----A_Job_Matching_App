@@ -85,6 +85,7 @@ export interface IUser extends Document {
   rating?: number;
   jobCompleted?: number;
   plan?: Plan;
+  swipeCount?: number; // For fitters, to track how many swipes they have made in the current subscription period
   lattitude?: number;
   longitude?: number;
   fcmTokens: IFcmTokenEntry[];
@@ -243,6 +244,10 @@ const UserSchema = new Schema<IUser>(
     plan: {
       type: String,
       enum: Object.values(Plan),
+    },
+    swipeCount: {
+      type: Number,
+      default: 0,
     },
     lattitude: {
       type: Number,
