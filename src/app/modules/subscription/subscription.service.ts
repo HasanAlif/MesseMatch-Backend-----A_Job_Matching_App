@@ -5,6 +5,7 @@ import { User, UserRole, Plan } from "../../models";
 
 interface SwipeCountResponse {
   swipeCount: number;
+  remainingSwipes?: number;
   updatedAt: Date;
 }
 
@@ -13,7 +14,6 @@ interface UpdatePlanResponse {
   updatedAt: Date;
 }
 
-// Allowed plans per role
 const FITTER_PLANS = [Plan.FREE, Plan.PREMIUM_DE, Plan.PREMIUM_EU];
 const COMPANY_PLANS = [
   Plan.FREE,
@@ -22,6 +22,34 @@ const COMPANY_PLANS = [
   Plan.PREMIUM,
 ];
 
+const SWIPE_LIMITS: Record<Plan, number | null> = {
+  [Plan.FREE]: 30,
+  [Plan.PREMIUM_DE]: null,
+  [Plan.PREMIUM_EU]: null,
+  [Plan.LAUNCH_PREMIUM]: null,
+  [Plan.BASIC]: null,
+  [Plan.PREMIUM]: null,
+};
+
+const isNewMonth = (resetDate: Date | undefined): boolean => {
+  if (!resetDate) return true;
+
+  const now = new Date();
+  const lastReset = new Date(resetDate);
+
+  return (
+    now.getMonth() !== lastReset.getMonth() ||
+    now.getFullYear() !== lastReset.getFullYear()
+  );
+};
+
+const formatResetDate = (date: Date): string => {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "long",
+  }).format(date);
+};
+
 const swipeCountForFitter = async (
   fitterId: string,
 ): Promise<SwipeCountResponse> => {
@@ -29,18 +57,62 @@ const swipeCountForFitter = async (
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid fitter ID");
   }
 
+  const user = await User.findById(fitterId).select(
+    "plan swipeCount swipeCountResetAt",
+  );
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+  }
+
+  const userPlan = user.plan || Plan.FREE;
+  const swipeLimit = SWIPE_LIMITS[userPlan];
+
+  const resetNeeded = isNewMonth(user.swipeCountResetAt);
+  let currentSwipeCount = user.swipeCount || 0;
+
+  if (resetNeeded) {
+    currentSwipeCount = 0;
+    await User.findByIdAndUpdate(
+      fitterId,
+      {
+        swipeCount: 0,
+        swipeCountResetAt: new Date(),
+      },
+      { runValidators: false },
+    );
+  }
+
+  if (swipeLimit !== null && currentSwipeCount >= swipeLimit) {
+    const nextResetDate = new Date();
+    nextResetDate.setMonth(nextResetDate.getMonth() + 1);
+
+    throw new ApiError(
+      httpStatus.PAYMENT_REQUIRED,
+      `You've reached your ${swipeLimit} swipes for ${formatResetDate(new Date())}. Upgrade to Premium for unlimited swipes and unlock more features! 🚀`,
+    );
+  }
+
   const updatedUser = await User.findByIdAndUpdate(
     fitterId,
     { $inc: { swipeCount: 1 } },
     { new: true, runValidators: false },
-  );
+  ).select("swipeCount updatedAt");
 
   if (!updatedUser) {
-    throw new ApiError(httpStatus.NOT_FOUND, "Fitter not found");
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      "Failed to update swipe count",
+    );
   }
 
+  const newSwipeCount = updatedUser.swipeCount || 0;
+  const remainingSwipes =
+    swipeLimit !== null ? Math.max(0, swipeLimit - newSwipeCount) : undefined;
+
   return {
-    swipeCount: updatedUser.swipeCount || 0,
+    swipeCount: newSwipeCount,
+    remainingSwipes,
     updatedAt: updatedUser.updatedAt,
   };
 };
@@ -49,18 +121,15 @@ const updatePlanStatus = async (
   userId: string,
   newPlan: Plan,
 ): Promise<UpdatePlanResponse> => {
-  // Validate userId
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
   }
 
-  // Fetch user to get role and validate existence
   const user = await User.findById(userId).select("role plan");
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, "User not found");
   }
 
-  // Validate plan is allowed for user's role
   const allowedPlans =
     user.role === UserRole.FITTER ? FITTER_PLANS : COMPANY_PLANS;
   if (!allowedPlans.includes(newPlan)) {
@@ -71,7 +140,6 @@ const updatePlanStatus = async (
     );
   }
 
-  // Update user plan
   const updatedUser = await User.findByIdAndUpdate(
     userId,
     { plan: newPlan },

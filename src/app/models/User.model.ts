@@ -86,6 +86,7 @@ export interface IUser extends Document {
   jobCompleted?: number;
   plan?: Plan;
   swipeCount?: number; // For fitters, to track how many swipes they have made in the current subscription period
+  swipeCountResetAt?: Date; // Tracks when the monthly swipe counter was last reset
   lattitude?: number;
   longitude?: number;
   fcmTokens: IFcmTokenEntry[];
@@ -249,6 +250,10 @@ const UserSchema = new Schema<IUser>(
     swipeCount: {
       type: Number,
       default: 0,
+    },
+    swipeCountResetAt: {
+      type: Date,
+      default: () => new Date(),
     },
     lattitude: {
       type: Number,
