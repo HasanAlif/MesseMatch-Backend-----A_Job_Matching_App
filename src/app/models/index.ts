@@ -4,6 +4,7 @@ export {
   UserRole,
   UserStatus,
   AuthProvider,
+  Plan,
   DevicePlatform,
   IFcmTokenEntry,
   FCM_TOKEN_CONFIG,

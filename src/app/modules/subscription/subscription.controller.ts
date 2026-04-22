@@ -20,6 +20,23 @@ const incrementSwipeCount = catchAsync(
   },
 );
 
+const updatePlan = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const userId = req.user?.id as string;
+    const { plan } = req.body;
+
+    const result = await subscriptionService.updatePlanStatus(userId, plan);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Plan updated successfully",
+      data: result,
+    });
+  },
+);
+
 export const subscriptionController = {
   incrementSwipeCount,
+  updatePlan,
 };

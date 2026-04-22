@@ -244,6 +244,7 @@ const UserSchema = new Schema<IUser>(
     plan: {
       type: String,
       enum: Object.values(Plan),
+      default: Plan.FREE,
     },
     swipeCount: {
       type: Number,
