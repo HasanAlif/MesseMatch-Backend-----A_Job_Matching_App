@@ -148,6 +148,7 @@ const CompleteProfileAsFitterSchema = z.object({
   userName: z.string().min(2).max(50).optional(),
   fullName: z.string().min(2).max(100).optional(),
   postalCode: z.string().min(3).max(20).optional(),
+  country: z.string().optional(),
   workLocations: stringArrayField.optional(),
   skills: stringArrayField.optional(),
   spokenLanguages: stringArrayField.optional(),
@@ -169,6 +170,7 @@ const CompleteProfileAsCompanySchema = z.object({
     .email("Please provide a valid business email")
     .optional(),
   contactPersonName: z.string().min(2).max(100).optional(),
+  country: z.string().optional(),
   postalCode: z.string().min(3).max(20).optional(),
   lattitude: z.coerce.number().min(-90).max(90).optional(),
   longitude: z.coerce.number().min(-180).max(180).optional(),

@@ -259,6 +259,7 @@ const completeProfileAsFitter = async (
     fullName?: string;
     postalCode?: string;
     workLocations?: string[];
+    country: string;
     skills?: string[];
     spokenLanguages?: string[];
     driversLicense?: string;
@@ -305,6 +306,7 @@ const completeProfileAsCompany = async (
     companyName?: string;
     businessEmail?: string;
     contactPersonName?: string;
+    country: string;
     postalCode?: string;
     lattitude?: number;
     longitude?: number;
