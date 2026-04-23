@@ -295,5 +295,6 @@ UserSchema.index({ mobileNumber: 1 });
 UserSchema.index({ googleId: 1 });
 UserSchema.index({ "fcmTokens.deviceId": 1 });
 UserSchema.index({ "fcmTokens.token": 1 });
+UserSchema.index({ country: 1 });
 
 export const User = mongoose.model<IUser>("User", UserSchema);

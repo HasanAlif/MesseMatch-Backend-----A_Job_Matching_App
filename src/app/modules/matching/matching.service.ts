@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import httpStatus from "http-status";
-import { User, UserRole, UserStatus } from "../../models";
+import { User, UserRole, UserStatus, Plan } from "../../models";
 import { Job, JobStatus } from "../job/job.model";
 import { JobRequest, JobRequestStatus } from "../job/jobRequest.model";
 import ApiError from "../../../errors/ApiErrors";
@@ -36,6 +36,7 @@ interface FitterProfile {
   dailyRate?: number;
   skills?: string[];
   spokenLanguages?: string[];
+  plan?: Plan;
   lattitude?: number;
   longitude?: number;
 }
@@ -45,6 +46,7 @@ interface CompanyProfile {
   companyName?: string;
   lattitude?: number;
   longitude?: number;
+  country?: string;
 }
 
 interface JobForMatching {
@@ -411,7 +413,7 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
   }
 
   const fitter = await User.findById(userId)
-    .select("role status skills spokenLanguages lattitude longitude")
+    .select("role status plan skills spokenLanguages lattitude longitude")
     .lean<FitterProfile>();
 
   if (!fitter) {
@@ -443,12 +445,20 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
     ...new Set(jobs.map((job) => job.createdBy.toString())),
   ].map((id) => new mongoose.Types.ObjectId(id));
 
-  const companies = await User.find({
+  // Build company filter based on fitter's plan
+  const companyFilter: Record<string, any> = {
     _id: { $in: companyIds },
     role: UserRole.COMPANY,
     status: UserStatus.ACTIVE,
-  })
-    .select("companyName lattitude longitude")
+  };
+
+  // Apply country filter only if fitter does NOT have PREMIUM_EU plan
+  if (fitter.plan !== Plan.PREMIUM_EU) {
+    companyFilter.country = "Germany";
+  }
+
+  const companies = await User.find(companyFilter)
+    .select("companyName lattitude longitude country")
     .lean<CompanyProfile[]>();
 
   const companyMap = new Map(
@@ -1215,6 +1225,7 @@ interface ResolvedFilters {
   maximumRate?: number;
   projectPeriodFrom: Date;
   projectPeriodTo?: Date;
+  plan?: Plan;
 }
 
 const resolveFitterFilters = async (
@@ -1222,7 +1233,7 @@ const resolveFitterFilters = async (
   filters: JobSearchFilterPayload,
 ): Promise<ResolvedFilters> => {
   const fitter = await User.findById(fitterId)
-    .select("skills lattitude longitude hourlyRate")
+    .select("plan skills lattitude longitude hourlyRate")
     .lean<FitterProfile>();
 
   if (!fitter) {
@@ -1248,6 +1259,7 @@ const resolveFitterFilters = async (
     maximumRate: filters.maximumRate,
     projectPeriodFrom: filters.projectPeriodFrom ?? new Date(),
     projectPeriodTo: filters.projectPeriodTo,
+    plan: fitter.plan,
   };
 };
 
@@ -1272,12 +1284,20 @@ const searchAndFilterJobs = async (
     ...new Set(jobs.map((job) => job.createdBy.toString())),
   ].map((id) => new mongoose.Types.ObjectId(id));
 
-  const companies = await User.find({
+  // Build company filter based on fitter's plan
+  const companyFilter: Record<string, any> = {
     _id: { $in: companyIds },
     role: UserRole.COMPANY,
     status: UserStatus.ACTIVE,
-  })
-    .select("companyName lattitude longitude")
+  };
+
+  // Apply country filter only if fitter does NOT have PREMIUM_EU plan
+  if (resolved.plan !== Plan.PREMIUM_EU) {
+    companyFilter.country = "Germany";
+  }
+
+  const companies = await User.find(companyFilter)
+    .select("companyName lattitude longitude country")
     .lean<CompanyProfile[]>();
 
   const companyMap = new Map(
