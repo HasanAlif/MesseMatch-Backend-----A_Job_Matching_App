@@ -819,8 +819,8 @@ const matchingForCompany = async (
     status: UserStatus.ACTIVE,
   };
 
-  // Apply country filter only if company does NOT have PREMIUM_EU plan
-  if (company.plan !== Plan.PREMIUM_EU) {
+  // Apply country filter only if company has BASIC plan
+  if (company.plan === Plan.BASIC) {
     fitterFilter.country = "Germany";
   }
 

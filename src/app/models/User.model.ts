@@ -85,8 +85,8 @@ export interface IUser extends Document {
   rating?: number;
   jobCompleted?: number;
   plan?: Plan;
-  swipeCount?: number; // For fitters, to track how many swipes they have made in the current subscription period
-  swipeCountResetAt?: Date; // Tracks when the monthly swipe counter was last reset
+  swipeCount?: number;
+  swipeCountResetAt?: Date;
   lattitude?: number;
   longitude?: number;
   fcmTokens: IFcmTokenEntry[];
