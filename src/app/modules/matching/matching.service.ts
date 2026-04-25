@@ -24,7 +24,27 @@ interface MatchingResponse {
   MatchingJobs: FitterMatchingJob[];
 }
 
+interface CompanyMatchingFitter {
+  fitterId: string;
+  profilePicture?: string;
+  userName?: string;
+  rating?: number;
+  jobCompleted?: number;
+  workLocations?: string[];
+  hourlyRate?: number;
+  dailyRate?: number;
+  skills?: string[];
+  spokenLanguages?: string[];
+  distance?: number;
+  matchScore: number;
+}
+
+interface CompanyMatchingResponse {
+  matchingFitters: CompanyMatchingFitter[];
+}
+
 interface FitterProfile {
+  _id?: mongoose.Types.ObjectId;
   role?: UserRole;
   status?: UserStatus;
   profilePicture?: string;
@@ -725,6 +745,189 @@ const requestForJob = async (
     skills: createdRequest.skills ?? [],
     requestStatus: createdRequest.requestStatus,
   };
+};
+
+const matchingForCompany = async (
+  companyId: string,
+): Promise<CompanyMatchingResponse> => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const company = await User.findById(companyId)
+    .select("role status plan lattitude longitude country")
+    .lean<{
+      role?: UserRole;
+      status?: UserStatus;
+      plan?: Plan;
+      lattitude?: number;
+      longitude?: number;
+      country?: string;
+    }>();
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  if (company.role !== UserRole.COMPANY) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "Only companies can access this resource",
+    );
+  }
+
+  if (company.status !== UserStatus.ACTIVE) {
+    throw new ApiError(httpStatus.FORBIDDEN, "Company account is not active");
+  }
+
+  // Get all ACTIVE jobs for this company
+  const jobs = await Job.find({
+    createdBy: companyId,
+    jobStatus: JobStatus.ACTIVE,
+  })
+    .select("requieredSkills requiredLanguages minimumRate maximumRate")
+    .lean<JobForMatching[]>();
+
+  if (!jobs.length) {
+    return { matchingFitters: [] };
+  }
+
+  // Aggregate all requirements from company's jobs
+  const allRequiredSkills = new Set<string>();
+  const allRequiredLanguages = new Set<string>();
+  let jobMinRate = Number.MAX_VALUE;
+  let jobMaxRate = 0;
+
+  jobs.forEach((job) => {
+    const skills = normalizeTextArray(job.requieredSkills);
+    const languages = normalizeTextArray(job.requiredLanguages);
+
+    skills.forEach((skill) => allRequiredSkills.add(skill));
+    languages.forEach((lang) => allRequiredLanguages.add(lang));
+
+    if (job.minimumRate && job.minimumRate < jobMinRate) {
+      jobMinRate = job.minimumRate;
+    }
+    if (job.maximumRate && job.maximumRate > jobMaxRate) {
+      jobMaxRate = job.maximumRate;
+    }
+  });
+
+  // Build fitter filter based on company's plan
+  const fitterFilter: Record<string, any> = {
+    role: UserRole.FITTER,
+    status: UserStatus.ACTIVE,
+  };
+
+  // Apply country filter only if company does NOT have PREMIUM_EU plan
+  if (company.plan !== Plan.PREMIUM_EU) {
+    fitterFilter.country = "Germany";
+  }
+
+  const fitters = await User.find(fitterFilter)
+    .select(
+      "profilePicture userName rating jobCompleted workLocations hourlyRate dailyRate skills spokenLanguages lattitude longitude",
+    )
+    .lean<FitterProfile[]>();
+
+  if (!fitters.length) {
+    return { matchingFitters: [] };
+  }
+
+  const companySkills = Array.from(allRequiredSkills);
+  const companyLanguages = Array.from(allRequiredLanguages);
+
+  const matchingFitters = fitters
+    .reduce<CompanyMatchingFitter[]>((acc, fitter) => {
+      const fitterSkills = normalizeTextArray(fitter.skills);
+      const fitterLanguages = normalizeTextArray(fitter.spokenLanguages);
+
+      // Calculate skill match score
+      const skillsScore = calculateOverlapScore(fitterSkills, companySkills);
+
+      // Calculate language match score
+      const languageScore = calculateOverlapScore(
+        fitterLanguages,
+        companyLanguages,
+      );
+
+      // Calculate distance
+      const hasCoordinates =
+        typeof fitter.lattitude === "number" &&
+        typeof fitter.longitude === "number" &&
+        typeof company.lattitude === "number" &&
+        typeof company.longitude === "number";
+
+      const distanceKm = hasCoordinates
+        ? haversineDistance(
+            fitter.lattitude as number,
+            fitter.longitude as number,
+            company.lattitude as number,
+            company.longitude as number,
+          )
+        : undefined;
+
+      const distanceScore = calculateDistanceScore(distanceKm);
+
+      // Calculate final match score
+      const finalScore =
+        skillsScore * MATCHING_CONFIG.WEIGHTS.skills +
+        languageScore * MATCHING_CONFIG.WEIGHTS.languages +
+        distanceScore * MATCHING_CONFIG.WEIGHTS.distance;
+
+      const matchScore = roundToTwo(finalScore);
+
+      if (matchScore <= MATCHING_CONFIG.MINIMUM_SCORE_PERCENT) {
+        return acc;
+      }
+
+      // Check rate compatibility: fitter's hourly rate should be within job's rate range
+      const fitterRate = fitter.hourlyRate ?? 0;
+      if (jobMinRate !== Number.MAX_VALUE && jobMaxRate > 0) {
+        if (fitterRate > jobMaxRate || fitterRate < jobMinRate) {
+          return acc;
+        }
+      }
+
+      acc.push({
+        fitterId: fitter._id!.toString(),
+        profilePicture: fitter.profilePicture,
+        userName: fitter.userName,
+        rating: fitter.rating,
+        jobCompleted: fitter.jobCompleted,
+        workLocations: fitter.workLocations ?? [],
+        hourlyRate: fitter.hourlyRate,
+        dailyRate: fitter.dailyRate,
+        skills: fitter.skills ?? [],
+        spokenLanguages: fitter.spokenLanguages ?? [],
+        distance:
+          typeof distanceKm === "number" ? roundToTwo(distanceKm) : undefined,
+        matchScore,
+      });
+
+      return acc;
+    }, [])
+    .sort((a, b) => {
+      if (b.matchScore !== a.matchScore) {
+        return b.matchScore - a.matchScore;
+      }
+
+      if (typeof a.distance === "number" && typeof b.distance === "number") {
+        return a.distance - b.distance;
+      }
+
+      if (typeof a.distance === "number") {
+        return -1;
+      }
+
+      if (typeof b.distance === "number") {
+        return 1;
+      }
+
+      return 0;
+    });
+
+  return { matchingFitters };
 };
 
 const getIncomingRequestsForCompany = async (
@@ -1540,6 +1743,7 @@ const getRequestedJobsForFitter = async (
 
 export const matchingService = {
   matchingForFitter,
+  matchingForCompany,
   requestForJob,
   getIncomingRequestsForCompany,
   getActiveJobRequestsForCompany,

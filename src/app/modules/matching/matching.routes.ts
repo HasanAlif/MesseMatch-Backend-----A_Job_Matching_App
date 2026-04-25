@@ -14,6 +14,12 @@ router.get(
 );
 
 router.get(
+  "/company",
+  auth(UserRole.COMPANY),
+  matchingController.getMatchingFittersForCompany,
+);
+
+router.get(
   "/search-filter",
   auth(UserRole.FITTER),
   validateRequest(matchingValidation.searchAndFilterJobsSchema),

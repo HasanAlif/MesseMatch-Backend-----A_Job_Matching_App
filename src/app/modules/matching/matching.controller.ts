@@ -20,6 +20,20 @@ const getMatchingJobsForFitter = catchAsync(
   },
 );
 
+const getMatchingFittersForCompany = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const result = await matchingService.matchingForCompany(companyId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Matching fitters retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 const requestForJob = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const fitterId = req.user?.id as string;
@@ -209,6 +223,7 @@ const getRequestedJobsForFitter = catchAsync(
 
 export const matchingController = {
   getMatchingJobsForFitter,
+  getMatchingFittersForCompany,
   requestForJob,
   getIncomingRequestsForCompany,
   getActiveJobRequestsForCompany,
