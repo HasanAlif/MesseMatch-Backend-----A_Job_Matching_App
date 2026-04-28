@@ -3,6 +3,7 @@ import { Job, IJob, JobStatus } from "./job.model";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { fileUploader } from "../../../helpars/fileUploader";
+import { User, Plan } from "../../models";
 
 interface CreateJobPayload {
   projectName: string;
@@ -71,6 +72,37 @@ const formatProjectPeriod = (
   return `${fromDay} ${fromMonth} ${fromYear} - ${toDay} ${toMonth} ${toYear}`;
 };
 
+const validateJobCreateLimit = async (companyId: string): Promise<void> => {
+  const company = await User.findById(companyId)
+    .select("plan")
+    .lean<{ plan?: Plan }>();
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  const plan = company.plan;
+
+  // Determine job limit based on plan
+  let limit = 5; // Default limit for BASIC and LAUNCH_PREMIUM
+  if (plan === Plan.PREMIUM) {
+    limit = 12;
+  }
+
+  const activeJobCount = await Job.countDocuments({
+    createdBy: new mongoose.Types.ObjectId(companyId),
+    jobStatus: JobStatus.ACTIVE,
+  });
+
+  if (activeJobCount >= limit) {
+    const planName = plan || "BASIC";
+    throw new ApiError(
+      httpStatus.CONFLICT,
+      `You have reached the maximum job creation limit of ${limit} jobs for your ${planName} plan. Please upgrade your plan or delete existing jobs to create new ones.`,
+    );
+  }
+};
+
 const createJob = async (
   companyId: string,
   payload: CreateJobPayload,
@@ -79,6 +111,8 @@ const createJob = async (
   if (!mongoose.Types.ObjectId.isValid(companyId)) {
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
   }
+
+  await validateJobCreateLimit(companyId);
 
   const jobData: Record<string, unknown> = {
     ...payload,
