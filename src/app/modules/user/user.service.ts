@@ -9,8 +9,9 @@ import emailSender from "../../../shared/emailSender";
 import { EMAIL_VERIFICATION_TEMPLATE } from "../../../utils/Template";
 import { generateDeviceUUID } from "../../../utils/generateDeviceUUID";
 import { fileUploader } from "../../../helpars/fileUploader";
-import { UserRole, DevicePlatform } from "../../models/User.model";
+import { UserRole, DevicePlatform, Plan } from "../../models/User.model";
 import { notificationService } from "../notification/notification.service";
+import { pl } from "zod/v4/locales";
 
 // Create a new user - Registration with OTP verification
 const createUserIntoDb = async (payload: {
@@ -283,6 +284,11 @@ const completeProfileAsFitter = async (
     role: UserRole.FITTER,
   };
 
+  // Set default plan to FREE if not provided
+  if (!updateData.plan) {
+    updateData.plan = Plan.FREE;
+  }
+
   if (profilePictureFile) {
     const uploaded = await fileUploader.uploadToCloudinary(
       profilePictureFile,
@@ -310,6 +316,7 @@ const completeProfileAsCompany = async (
     postalCode?: string;
     lattitude?: number;
     longitude?: number;
+    plan?: string;
   },
   files?: {
     businessRegDocument?: Express.Multer.File;
@@ -325,6 +332,11 @@ const completeProfileAsCompany = async (
     ...payload,
     role: UserRole.COMPANY,
   };
+
+  // Set default plan to LAUNCH_PREMIUM if not provided
+  if (!updateData.plan) {
+    updateData.plan = Plan.LAUNCH_PREMIUM;
+  }
 
   // Upload documents to Cloudinary in parallel for maximum performance
   const [businessRegResult, taxIdResult] = await Promise.all([
