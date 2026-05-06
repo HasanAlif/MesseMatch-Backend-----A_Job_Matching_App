@@ -461,6 +461,25 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
     return { MatchingJobs: [] };
   }
 
+  // Exclude jobs that the fitter already requested or were rejected for
+  const jobIdsForRequests = [
+    ...new Set(jobs.map((job) => job._id.toString())),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
+  const existingRequests = await JobRequest.find({
+    jobId: { $in: jobIdsForRequests },
+    fitterId: new mongoose.Types.ObjectId(userId),
+    requestStatus: {
+      $in: [JobRequestStatus.REQUESTED, JobRequestStatus.REJECTED],
+    },
+  })
+    .select("jobId")
+    .lean<{ jobId: mongoose.Types.ObjectId }[]>();
+
+  const excludedJobIds = new Set(
+    existingRequests.map((r) => r.jobId.toString()),
+  );
+
   const companyIds = [
     ...new Set(jobs.map((job) => job.createdBy.toString())),
   ].map((id) => new mongoose.Types.ObjectId(id));
@@ -491,6 +510,11 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
   const matchingJobs = jobs
     .reduce<FitterMatchingJob[]>((acc, job) => {
       const company = companyMap.get(job.createdBy.toString());
+
+      // Skip job if fitter already requested or was rejected for it
+      if (excludedJobIds.has(job._id.toString())) {
+        return acc;
+      }
 
       if (!company) {
         return acc;
