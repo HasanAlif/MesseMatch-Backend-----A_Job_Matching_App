@@ -14,6 +14,8 @@ interface FitterMatchingJob {
   companyName: string;
   projectLocation?: string;
   projectPeriod?: string;
+  minimumRate?: number;
+  maximumRate?: number;
   personNeeded?: number;
   requieredSkills: string[];
   distance?: number;
@@ -453,7 +455,7 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
 
   const jobs = await Job.find({ jobStatus: JobStatus.ACTIVE })
     .select(
-      "projectPicture projectName projectLocation projectPeriodFrom projectPeriodTo personNeeded requieredSkills requiredLanguages createdBy",
+      "projectPicture projectName projectLocation projectPeriodFrom projectPeriodTo personNeeded requieredSkills requiredLanguages createdBy minimumRate maximumRate",
     )
     .lean<JobForMatching[]>();
 
@@ -567,6 +569,8 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
           job.projectPeriodFrom,
           job.projectPeriodTo,
         ),
+        minimumRate: job.minimumRate,
+        maximumRate: job.maximumRate,
         personNeeded: job.personNeeded,
         requieredSkills: job.requieredSkills ?? [],
         distance:
@@ -1642,6 +1646,8 @@ const searchAndFilterJobs = async (
           job.projectPeriodFrom,
           job.projectPeriodTo,
         ),
+        minimumRate: job.minimumRate,
+        maximumRate: job.maximumRate,
         personNeeded: job.personNeeded,
         requieredSkills: job.requieredSkills ?? [],
         distance:
