@@ -14,6 +14,20 @@ const getMonthlyUserGrowthSchema = z.object({
     .optional(),
 });
 
+const getMonthlyPremiumUserGrowthSchema = z.object({
+  query: z
+    .object({
+      year: z.coerce
+        .number()
+        .int()
+        .min(1900, "Year must be 1900 or later")
+        .max(2100, "Year must be 2100 or earlier")
+        .optional()
+        .default(new Date().getFullYear()),
+    })
+    .optional(),
+});
+
 const getAllUsersSchema = z.object({
   query: z
     .object({
@@ -82,6 +96,7 @@ const changeUserStatusSchema = z.object({
 
 export const adminValidation = {
   getMonthlyUserGrowthSchema,
+  getMonthlyPremiumUserGrowthSchema,
   getAllUsersSchema,
   searchUsersSchema,
   changeUserStatusSchema,

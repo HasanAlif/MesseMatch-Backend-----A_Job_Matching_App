@@ -16,6 +16,13 @@ router.get(
 );
 
 router.get(
+  "/monthly-premium-user-growth",
+  auth(UserRole.ADMIN),
+  validateRequest(adminValidation.getMonthlyPremiumUserGrowthSchema),
+  adminController.getMonthlyPremiumUserGrowth,
+);
+
+router.get(
   "/recent-users",
   auth(UserRole.ADMIN),
   adminController.getRecentUsers,

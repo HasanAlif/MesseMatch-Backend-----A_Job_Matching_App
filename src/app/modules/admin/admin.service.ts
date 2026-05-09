@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { AppContent, ContentType } from "./appContent.model";
-import { User, UserRole, UserStatus } from "../../models";
+import { Plan, User, UserRole, UserStatus } from "../../models";
 import { paginationHelper } from "../../../helpars/paginationHelper";
 import { fileUploader } from "../../../helpars/fileUploader";
 
@@ -66,6 +66,38 @@ const getMonthlyUserGrowth = async (year: number) => {
   const months = Array.from({ length: 12 }, (_, i) => ({
     month: i + 1,
     newUsers: monthlyDataMap.get(i + 1) || 0,
+  }));
+
+  return { year, months };
+};
+
+const getMonthlyPremiumUserGrowth = async (year: number) => {
+  const startDate = new Date(year, 0, 1);
+  const endDate = new Date(year + 1, 0, 1);
+
+  const result = await User.aggregate([
+    {
+      $match: {
+        plan: { $ne: Plan.FREE },
+        planChangedAt: { $gte: startDate, $lt: endDate },
+      },
+    },
+    {
+      $group: {
+        _id: { $month: "$planChangedAt" },
+        count: { $sum: 1 },
+      },
+    },
+    {
+      $sort: { _id: 1 },
+    },
+  ]);
+
+  const monthlyDataMap = new Map(result.map((item) => [item._id, item.count]));
+
+  const months = Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1,
+    count: monthlyDataMap.get(i + 1) || 0,
   }));
 
   return { year, months };
@@ -540,6 +572,7 @@ export const adminService = {
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
+  getMonthlyPremiumUserGrowth,
   getRecentUsers,
   getAllUsers,
   searchUsers,

@@ -142,7 +142,10 @@ const updatePlanStatus = async (
 
   const updatedUser = await User.findByIdAndUpdate(
     userId,
-    { plan: newPlan },
+    {
+      plan: newPlan,
+      ...(newPlan !== Plan.FREE ? { planChangedAt: new Date() } : {}),
+    },
     { new: true, runValidators: false },
   ).select("plan updatedAt");
 

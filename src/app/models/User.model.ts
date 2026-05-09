@@ -85,6 +85,7 @@ export interface IUser extends Document {
   rating?: number;
   jobCompleted?: number;
   plan?: Plan;
+  planChangedAt?: Date;
   swipeCount?: number;
   swipeCountResetAt?: Date;
   lattitude?: number;
@@ -246,6 +247,10 @@ const UserSchema = new Schema<IUser>(
       type: String,
       enum: Object.values(Plan),
       default: Plan.FREE,
+    },
+    planChangedAt: {
+      type: Date,
+      default: null,
     },
     swipeCount: {
       type: Number,

@@ -289,6 +289,10 @@ const completeProfileAsFitter = async (
     updateData.plan = Plan.FREE;
   }
 
+  if (updateData.plan !== Plan.FREE) {
+    updateData.planChangedAt = new Date();
+  }
+
   if (profilePictureFile) {
     const uploaded = await fileUploader.uploadToCloudinary(
       profilePictureFile,
@@ -337,6 +341,8 @@ const completeProfileAsCompany = async (
   if (!updateData.plan) {
     updateData.plan = Plan.LAUNCH_PREMIUM;
   }
+
+  updateData.planChangedAt = new Date();
 
   // Upload documents to Cloudinary in parallel for maximum performance
   const [businessRegResult, taxIdResult] = await Promise.all([

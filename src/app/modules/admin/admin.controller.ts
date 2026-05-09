@@ -64,6 +64,21 @@ const getMonthlyUserGrowth = catchAsync(
   },
 );
 
+const getMonthlyPremiumUserGrowth = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const year =
+      (req.query.year as unknown as number) || new Date().getFullYear();
+    const result = await adminService.getMonthlyPremiumUserGrowth(year);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Monthly premium expiry count retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 const getRecentUsers = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const result = await adminService.getRecentUsers();
@@ -172,6 +187,7 @@ export const adminController = {
   createOrUpdateContent,
   getContentByType,
   getMonthlyUserGrowth,
+  getMonthlyPremiumUserGrowth,
   getRecentUsers,
   getAllUsers,
   searchUsers,
