@@ -301,5 +301,6 @@ UserSchema.index({ googleId: 1 });
 UserSchema.index({ "fcmTokens.deviceId": 1 });
 UserSchema.index({ "fcmTokens.token": 1 });
 UserSchema.index({ country: 1 });
+UserSchema.index({ plan: 1, planChangedAt: -1 });
 
 export const User = mongoose.model<IUser>("User", UserSchema);

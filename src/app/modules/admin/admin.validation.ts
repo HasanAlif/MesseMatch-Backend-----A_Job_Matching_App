@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Plan } from "../../models";
 
 const getMonthlyUserGrowthSchema = z.object({
   query: z
@@ -33,6 +34,43 @@ const getAllUsersSchema = z.object({
     .object({
       plan: z.string().optional(),
       status: z.string().optional(),
+      page: z.coerce
+        .number()
+        .int()
+        .min(1, "Page must be at least 1")
+        .optional()
+        .default(1),
+      limit: z.coerce
+        .number()
+        .int()
+        .min(1, "Limit must be at least 1")
+        .max(100, "Limit must not exceed 100")
+        .optional()
+        .default(10),
+    })
+    .optional(),
+});
+
+const getPremiumUsersSchema = z.object({
+  query: z
+    .object({
+      plan: z
+        .enum(
+          [
+            Plan.PREMIUM_DE,
+            Plan.PREMIUM_EU,
+            Plan.LAUNCH_PREMIUM,
+            Plan.BASIC,
+            Plan.PREMIUM,
+          ],
+          {
+            errorMap: () => ({
+              message:
+                "Plan must be one of PREMIUM_DE, PREMIUM_EU, LAUNCH_PREMIUM, BASIC, PREMIUM",
+            }),
+          },
+        )
+        .optional(),
       page: z.coerce
         .number()
         .int()
@@ -98,6 +136,7 @@ export const adminValidation = {
   getMonthlyUserGrowthSchema,
   getMonthlyPremiumUserGrowthSchema,
   getAllUsersSchema,
+  getPremiumUsersSchema,
   searchUsersSchema,
   changeUserStatusSchema,
   updateAdminProfileSchema,

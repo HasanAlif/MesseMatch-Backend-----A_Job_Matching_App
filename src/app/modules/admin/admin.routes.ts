@@ -42,6 +42,13 @@ router.get(
   adminController.searchUsers,
 );
 
+router.get(
+  "/premium-users",
+  auth(UserRole.ADMIN),
+  validateRequest(adminValidation.getPremiumUsersSchema),
+  adminController.getPremiumUsers,
+);
+
 router.put(
   "/users/status/:userId",
   auth(UserRole.ADMIN),

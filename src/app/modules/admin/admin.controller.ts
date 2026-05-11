@@ -3,6 +3,7 @@ import sendResponse from "../../../shared/sendResponse";
 import catchAsync from "../../../shared/catchAsync";
 import { adminService } from "./admin.service";
 import { ContentType } from "./appContent.model";
+import { Plan } from "../../models";
 import { Request, Response } from "express";
 import { JwtPayload } from "jsonwebtoken";
 
@@ -110,6 +111,24 @@ const getAllUsers = catchAsync(
   },
 );
 
+const getPremiumUsers = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const plan = (req.query.plan as Plan) || undefined;
+    const page = (req.query.page as unknown as number) || 1;
+    const limit = (req.query.limit as unknown as number) || 10;
+
+    const result = await adminService.getPremiumUsers(plan, page, limit);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Premium users retrieved successfully",
+      meta: result.meta,
+      data: result.data,
+    });
+  },
+);
+
 const searchUsers = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const { searchQuery } = req.query;
@@ -190,6 +209,7 @@ export const adminController = {
   getMonthlyPremiumUserGrowth,
   getRecentUsers,
   getAllUsers,
+  getPremiumUsers,
   searchUsers,
   getAdminProfile,
   updateAdminProfile,

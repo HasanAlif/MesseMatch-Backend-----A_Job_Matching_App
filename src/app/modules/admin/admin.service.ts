@@ -249,6 +249,69 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
   };
 };
 
+const PREMIUM_PLANS: Plan[] = [
+  Plan.PREMIUM_DE,
+  Plan.PREMIUM_EU,
+  Plan.LAUNCH_PREMIUM,
+  Plan.BASIC,
+  Plan.PREMIUM,
+];
+
+const getPremiumUsers = async (plan?: Plan, page?: number, limit?: number) => {
+  const query: Record<string, unknown> = plan
+    ? { plan }
+    : { plan: { $in: PREMIUM_PLANS } };
+
+  const paginationData = paginationHelper.calculatePagination({ page, limit });
+
+  const [total, users] = await Promise.all([
+    User.countDocuments(query),
+    User.find(query, {
+      _id: 1,
+      fullName: 1,
+      email: 1,
+      profilePicture: 1,
+      mobileNumber: 1,
+      role: 1,
+      plan: 1,
+      planChangedAt: 1,
+      createdAt: 1,
+    })
+      .sort({ planChangedAt: -1, createdAt: -1 })
+      .skip(paginationData.skip)
+      .limit(paginationData.limit)
+      .lean(),
+  ]);
+
+  const formatDate = (date: Date): string =>
+    date.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+  const data = users.map((user) => ({
+    id: user._id.toString(),
+    profilePicture: user.profilePicture || null,
+    name: user.fullName || null,
+    email: user.email || null,
+    phoneNumber: user.mobileNumber || null,
+    role: user.role || null,
+    billingDate: user.planChangedAt ? formatDate(user.planChangedAt) : null,
+    plan: user.plan || null,
+  }));
+
+  return {
+    meta: {
+      page: paginationData.page,
+      limit: paginationData.limit,
+      total,
+      totalPages: Math.ceil(total / paginationData.limit) || 1,
+    },
+    data,
+  };
+};
+
 const searchUsers = async (
   searchQuery: string,
   page?: number,
@@ -575,6 +638,7 @@ export const adminService = {
   getMonthlyPremiumUserGrowth,
   getRecentUsers,
   getAllUsers,
+  getPremiumUsers,
   searchUsers,
   changeUserStatus,
   getAdminProfile,
