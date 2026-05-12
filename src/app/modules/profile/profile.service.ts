@@ -448,6 +448,27 @@ const updateSkillsLanguagesAndLicenses = async (
   };
 };
 
+const updateUserLanguage = async (userId: string, language: string) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
+  }
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { language: language },
+    { new: true, runValidators: true },
+  ).select("language updatedAt");
+
+  if (!user) {
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  return {
+    language: user.language,
+    updatedAt: user.updatedAt,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -459,4 +480,5 @@ export const profileService = {
   updateFitterProfile,
   getSkillsLanguagesAndLicensesForUpdate,
   updateSkillsLanguagesAndLicenses,
+  updateUserLanguage,
 };

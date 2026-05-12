@@ -34,8 +34,19 @@ const updateSkillsLanguagesAndLicensesSchema = z.object({
   driversLicense: z.string().optional(),
 });
 
+const updateUserLanguageSchema = z.object({
+  body: z.object({
+    language: z
+      .string({ required_error: "Language is required" })
+      .trim()
+      .min(2, "Language must be at least 2 characters")
+      .max(10, "Language must not exceed 10 characters"),
+  }),
+});
+
 export const profileValidation = {
   updateCompanyProfileSchema,
   changePasswordSchema,
   updateSkillsLanguagesAndLicensesSchema,
+  updateUserLanguageSchema,
 };

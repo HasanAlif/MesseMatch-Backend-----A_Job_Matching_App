@@ -73,4 +73,11 @@ router.patch(
   profileController.updateSkillsLanguagesAndLicenses,
 );
 
+router.patch(
+  "/language",
+  auth(),
+  validateRequest(profileValidation.updateUserLanguageSchema),
+  profileController.updateUserLanguage,
+);
+
 export const profileRoutes = router;
