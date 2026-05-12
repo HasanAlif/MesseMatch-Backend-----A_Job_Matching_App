@@ -254,6 +254,13 @@ interface RequestedCompanyProfile {
   _id: mongoose.Types.ObjectId;
   companyName?: string;
   profilePicture?: string;
+  lattitude?: number;
+  longitude?: number;
+}
+
+interface FitterLocationLookup {
+  lattitude?: number;
+  longitude?: number;
 }
 
 interface JobForRequestedLookup {
@@ -290,6 +297,7 @@ interface FitterRequestedActiveJob {
   projectPicture: string | null;
   projectName: string | null;
   projectLocation: string | null;
+  distance: number | null;
   personNeeded: number | null;
   requieredSkills: string[] | null;
   hourlyRate: number | null;
@@ -1712,21 +1720,29 @@ const getRequestedJobsForFitter = async (
     ...new Set(requests.map((request) => request.companyId.toString())),
   ].map((id) => new mongoose.Types.ObjectId(id));
 
-  const [jobs, companies] = await Promise.all([
+  const [jobs, companies, fitter] = await Promise.all([
     Job.find({ _id: { $in: jobIds } })
       .select(
         "projectPicture projectName projectLocation projectPeriodFrom projectPeriodTo personNeeded requieredSkills minimumRate maximumRate",
       )
       .lean<JobForRequestedLookup[]>(),
     User.find({ _id: { $in: companyIds } })
-      .select("companyName profilePicture")
+      .select("companyName profilePicture lattitude longitude")
       .lean<RequestedCompanyProfile[]>(),
+    User.findById(fitterObjectId)
+      .select("lattitude longitude")
+      .lean<FitterLocationLookup | null>(),
   ]);
 
   const jobMap = new Map(jobs.map((job) => [job._id.toString(), job]));
   const companyMap = new Map(
     companies.map((company) => [company._id.toString(), company]),
   );
+
+  const fitterLat = fitter?.lattitude;
+  const fitterLon = fitter?.longitude;
+  const hasFitterCoords =
+    typeof fitterLat === "number" && typeof fitterLon === "number";
 
   return {
     requestedJobs: requests.map((request) => {
@@ -1743,6 +1759,22 @@ const getRequestedJobsForFitter = async (
         job?.projectPeriodTo,
       );
 
+      const hasCompanyCoords =
+        typeof company?.lattitude === "number" &&
+        typeof company?.longitude === "number";
+
+      const distance =
+        hasFitterCoords && hasCompanyCoords
+          ? roundToTwo(
+              haversineDistance(
+                fitterLat as number,
+                fitterLon as number,
+                company!.lattitude as number,
+                company!.longitude as number,
+              ),
+            )
+          : null;
+
       return {
         requestId: request._id.toString(),
         companyId: request.companyId.toString(),
@@ -1751,6 +1783,7 @@ const getRequestedJobsForFitter = async (
         projectPicture: job?.projectPicture ?? null,
         profilePicture: company?.profilePicture ?? null,
         projectLocation: job?.projectLocation ?? null,
+        distance,
         days: typeof days === "number" ? days : null,
         hourlyRate:
           typeof request.hourlyRate === "number" ? request.hourlyRate : null,
