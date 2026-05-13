@@ -211,7 +211,7 @@ const getFitterProfile = async (fitterId: string) => {
 
   const fitter = await User.findById(fitterId)
     .select(
-      "role fullName profilePicture workLocations skills spokenLanguages hourlyRate dailyRate experienceYears bio rating jobCompleted plan",
+      "role fullName userName profilePicture workLocations skills spokenLanguages hourlyRate dailyRate experienceYears bio rating jobCompleted plan driversLicense",
     )
     .lean();
 
@@ -225,6 +225,7 @@ const getFitterProfile = async (fitterId: string) => {
 
   return {
     fullName: fitter.fullName,
+    userName: fitter.userName,
     profilePicture: fitter.profilePicture,
     rating: fitter.rating,
     jobCompleted: fitter.jobCompleted,
@@ -236,6 +237,8 @@ const getFitterProfile = async (fitterId: string) => {
     bio: fitter.bio,
     skills: fitter.skills,
     spokenLanguages: fitter.spokenLanguages,
+    driversLicense: fitter.driversLicense,
+
   };
 };
 
@@ -246,7 +249,7 @@ const getFitterProfileForUpdate = async (fitterId: string) => {
 
   const fitter = await User.findById(fitterId)
     .select(
-      "role profilePicture fullName userName mobileNumber postalCode workLocations hourlyRate dailyRate experienceYears bio",
+      "role profilePicture fullName userName mobileNumber postalCode workLocations hourlyRate dailyRate experienceYears bio driversLicense",
     )
     .lean();
 
@@ -261,7 +264,7 @@ const getFitterProfileForUpdate = async (fitterId: string) => {
   return {
     profilePicture: fitter.profilePicture,
     fullName: fitter.fullName,
-    username: fitter.userName,
+    userName: fitter.userName,
     mobileNumber: fitter.mobileNumber,
     postalCode: fitter.postalCode,
     workLocations: fitter.workLocations,
@@ -269,6 +272,7 @@ const getFitterProfileForUpdate = async (fitterId: string) => {
     dailyRate: fitter.dailyRate,
     experienceYears: fitter.experienceYears,
     bio: fitter.bio,
+    driversLicense: fitter.driversLicense,
   };
 };
 
@@ -285,6 +289,7 @@ const updateFitterProfile = async (
     dailyRate?: number;
     experienceYears?: number;
     bio?: string;
+    driversLicense?: boolean;
   },
 ) => {
   if (!mongoose.Types.ObjectId.isValid(fitterId)) {
