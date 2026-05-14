@@ -38,6 +38,41 @@ const getContentByType = async (type: ContentType) => {
   return result;
 };
 
+const PREMIUM_PLANS: Plan[] = [
+  Plan.PREMIUM_DE,
+  Plan.PREMIUM_EU,
+  Plan.LAUNCH_PREMIUM,
+  Plan.BASIC,
+  Plan.PREMIUM,
+];
+
+const ACTIVE_SWIPE_THRESHOLD = 10;
+
+const getUserStatisticsCounts = async () => {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [totalUsers, activeUsers, suspendedUsers, premiumUsers] =
+    await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({
+        swipeCount: { $gt: ACTIVE_SWIPE_THRESHOLD },
+        swipeCountResetAt: { $gte: startOfMonth },
+      }),
+      User.countDocuments({ status: UserStatus.SUSPEND }),
+      User.countDocuments({
+        plan: { $in: PREMIUM_PLANS },
+        $or: [
+          { premiumPlanExpiry: { $gte: now } },
+          { premiumPlanExpiry: { $exists: false } },
+          { premiumPlanExpiry: null },
+        ],
+      }),
+    ]);
+
+  return { totalUsers, activeUsers, suspendedUsers, premiumUsers };
+};
+
 const getMonthlyUserGrowth = async (year: number) => {
   const startDate = new Date(year, 0, 1);
   const endDate = new Date(year + 1, 0, 1);
@@ -248,14 +283,6 @@ const getAllUsers = async (status?: string, page?: number, limit?: number) => {
     data: formattedUsers,
   };
 };
-
-const PREMIUM_PLANS: Plan[] = [
-  Plan.PREMIUM_DE,
-  Plan.PREMIUM_EU,
-  Plan.LAUNCH_PREMIUM,
-  Plan.BASIC,
-  Plan.PREMIUM,
-];
 
 const getPremiumUsers = async (plan?: Plan, page?: number, limit?: number) => {
   const query: Record<string, unknown> = plan
@@ -634,6 +661,7 @@ export const adminService = {
   getContentTypeName,
   createOrUpdateContent,
   getContentByType,
+  getUserStatisticsCounts,
   getMonthlyUserGrowth,
   getMonthlyPremiumUserGrowth,
   getRecentUsers,

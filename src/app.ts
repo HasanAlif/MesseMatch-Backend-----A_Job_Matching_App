@@ -16,7 +16,7 @@ export const corsOptions = {
     "http://10.10.20.6:5173",
     "http://localhost:5173",
   ],
-  methods: ["GET", "POST", "PUT", "DELETE"],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 };

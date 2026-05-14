@@ -6,6 +6,7 @@ import app, { corsOptions } from "./app";
 import { initializeFirebase } from "./shared/firebase";
 import { socketHandler } from "./socket/socketHandler";
 import { MESSAGE_CONFIG } from "./app/modules/message/message.constants";
+import { initSwipeCountResetCron } from "./app/cron/swipeCountReset.cron";
 
 let server: HttpServer;
 let io: SocketIOServer;
@@ -42,6 +43,9 @@ async function main() {
   }
 
   await startServer();
+
+  initSwipeCountResetCron();
+
   const exitHandler = () => {
     if (server) {
       server.close(() => {

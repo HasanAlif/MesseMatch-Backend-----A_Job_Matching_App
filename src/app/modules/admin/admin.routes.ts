@@ -23,6 +23,12 @@ router.get(
 );
 
 router.get(
+  "/user-statistics-counts",
+  auth(UserRole.ADMIN),
+  adminController.getUserStatisticsCounts,
+);
+
+router.get(
   "/recent-users",
   auth(UserRole.ADMIN),
   adminController.getRecentUsers,

@@ -50,6 +50,19 @@ const getContentByType = catchAsync(async (req, res) => {
   });
 });
 
+const getUserStatisticsCounts = catchAsync(
+  async (_req: Request & { user?: JwtPayload }, res: Response) => {
+    const result = await adminService.getUserStatisticsCounts();
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "User statistics counts retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 const getMonthlyUserGrowth = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const year =
@@ -205,6 +218,7 @@ const updateAdminProfile = catchAsync(
 export const adminController = {
   createOrUpdateContent,
   getContentByType,
+  getUserStatisticsCounts,
   getMonthlyUserGrowth,
   getMonthlyPremiumUserGrowth,
   getRecentUsers,
