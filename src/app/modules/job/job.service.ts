@@ -4,6 +4,18 @@ import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { fileUploader } from "../../../helpars/fileUploader";
 import { User, Plan } from "../../models";
+import {
+  JOB_CREATION_LIMITS,
+  JOB_CREATION_WARN_AT,
+} from "../subscription/subscription.constants";
+import {
+  notifyJobLimitWarning,
+  notifyJobLimitReached,
+} from "./job.notifications";
+import { hasNotificationOfTypeSince } from "../notification/notification.daily.helpers";
+import { NotificationType } from "../notification/notification.model";
+
+const JOB_LIMIT_DEDUP_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface CreateJobPayload {
   projectName: string;
@@ -72,6 +84,11 @@ const formatProjectPeriod = (
   return `${fromDay} ${fromMonth} ${fromYear} - ${toDay} ${toMonth} ${toYear}`;
 };
 
+const resolveJobLimit = (plan: Plan | undefined): number => {
+  const effectivePlan = plan ?? Plan.BASIC;
+  return JOB_CREATION_LIMITS[effectivePlan] ?? JOB_CREATION_LIMITS[Plan.BASIC];
+};
+
 const validateJobCreateLimit = async (companyId: string): Promise<void> => {
   const company = await User.findById(companyId)
     .select("plan")
@@ -82,12 +99,7 @@ const validateJobCreateLimit = async (companyId: string): Promise<void> => {
   }
 
   const plan = company.plan;
-
-  // Determine job limit based on plan
-  let limit = 5; // Default limit for BASIC and LAUNCH_PREMIUM
-  if (plan === Plan.PREMIUM) {
-    limit = 12;
-  }
+  const limit = resolveJobLimit(plan);
 
   const activeJobCount = await Job.countDocuments({
     createdBy: new mongoose.Types.ObjectId(companyId),
@@ -129,7 +141,56 @@ const createJob = async (
   }
 
   const job = await Job.create(jobData);
+
+  void notifyJobLimitProgress(companyId).catch((err) =>
+    console.error(
+      "[notify] notifyJobLimitProgress unexpected:",
+      (err as Error).message,
+    ),
+  );
+
   return job;
+};
+
+const notifyJobLimitProgress = async (companyId: string): Promise<void> => {
+  const company = await User.findById(companyId)
+    .select("plan")
+    .lean<{ plan?: Plan }>();
+  if (!company || !company.plan) return;
+  const plan = company.plan;
+  const limit = JOB_CREATION_LIMITS[plan];
+  const warnAt = JOB_CREATION_WARN_AT[plan];
+  if (!limit) return;
+
+  const activeJobCount = await Job.countDocuments({
+    createdBy: new mongoose.Types.ObjectId(companyId),
+    jobStatus: JobStatus.ACTIVE,
+  });
+
+  const dedupSince = new Date(Date.now() - JOB_LIMIT_DEDUP_WINDOW_MS);
+
+  if (activeJobCount >= limit) {
+    const alreadyReached = await hasNotificationOfTypeSince(
+      companyId,
+      NotificationType.JOB_LIMIT_REACHED,
+      dedupSince,
+    );
+    if (!alreadyReached) {
+      void notifyJobLimitReached(companyId, plan, limit);
+    }
+    return;
+  }
+
+  if (warnAt !== null && activeJobCount >= warnAt) {
+    const alreadyWarned = await hasNotificationOfTypeSince(
+      companyId,
+      NotificationType.JOB_LIMIT_WARNING,
+      dedupSince,
+    );
+    if (!alreadyWarned) {
+      void notifyJobLimitWarning(companyId, plan, activeJobCount, limit);
+    }
+  }
 };
 
 const updateJob = async (

@@ -2,6 +2,15 @@ import mongoose from "mongoose";
 import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { User, UserRole, Plan } from "../../models";
+import {
+  SWIPE_LIMITS,
+  SWIPE_WARN_AT,
+  getPlanDurationMs,
+} from "./subscription.constants";
+import {
+  notifySwipeThreshold,
+  notifySwipeLimitReached,
+} from "./subscription.notifications";
 
 interface SwipeCountResponse {
   swipeCount: number;
@@ -21,15 +30,6 @@ const COMPANY_PLANS = [
   Plan.BASIC,
   Plan.PREMIUM,
 ];
-
-const SWIPE_LIMITS: Record<Plan, number | null> = {
-  [Plan.FREE]: 30,
-  [Plan.PREMIUM_DE]: null,
-  [Plan.PREMIUM_EU]: null,
-  [Plan.LAUNCH_PREMIUM]: null,
-  [Plan.BASIC]: null,
-  [Plan.PREMIUM]: null,
-};
 
 const isNewMonth = (resetDate: Date | undefined): boolean => {
   if (!resetDate) return true;
@@ -84,8 +84,7 @@ const swipeCountForFitter = async (
   }
 
   if (swipeLimit !== null && currentSwipeCount >= swipeLimit) {
-    const nextResetDate = new Date();
-    nextResetDate.setMonth(nextResetDate.getMonth() + 1);
+    void notifySwipeLimitReached(fitterId, swipeLimit, user.swipeCountResetAt);
 
     throw new ApiError(
       httpStatus.PAYMENT_REQUIRED,
@@ -109,6 +108,15 @@ const swipeCountForFitter = async (
   const newSwipeCount = updatedUser.swipeCount || 0;
   const remainingSwipes =
     swipeLimit !== null ? Math.max(0, swipeLimit - newSwipeCount) : undefined;
+
+  if (swipeLimit !== null && newSwipeCount === SWIPE_WARN_AT) {
+    void notifySwipeThreshold(
+      fitterId,
+      newSwipeCount,
+      swipeLimit,
+      user.swipeCountResetAt,
+    );
+  }
 
   return {
     swipeCount: newSwipeCount,
@@ -140,11 +148,26 @@ const updatePlanStatus = async (
     );
   }
 
+  const now = new Date();
+  const durationMs = getPlanDurationMs(newPlan);
+
+  const updatePayload: Record<string, unknown> = { plan: newPlan };
+  const unsetPayload: Record<string, 1> = {};
+
+  if (newPlan === Plan.FREE) {
+    unsetPayload.premiumPlanExpiry = 1;
+  } else {
+    updatePayload.planChangedAt = now;
+    if (durationMs !== null) {
+      updatePayload.premiumPlanExpiry = new Date(now.getTime() + durationMs);
+    }
+  }
+
   const updatedUser = await User.findByIdAndUpdate(
     userId,
     {
-      plan: newPlan,
-      ...(newPlan !== Plan.FREE ? { planChangedAt: new Date() } : {}),
+      $set: updatePayload,
+      ...(Object.keys(unsetPayload).length > 0 ? { $unset: unsetPayload } : {}),
     },
     { new: true, runValidators: false },
   ).select("plan updatedAt");

@@ -1,11 +1,16 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
 
 export enum NotificationType {
-  JOB_APPLICATION = "JOB_APPLICATION",
-  JOB_UPDATE = "JOB_UPDATE",
-  MESSAGE = "MESSAGE",
-  SYSTEM = "SYSTEM",
-  MARKETING = "MARKETING",
+  JOB_REQUEST_ACCEPTED = "JOB_REQUEST_ACCEPTED",
+  JOB_RATING_RECEIVED = "JOB_RATING_RECEIVED",
+  DAILY_JOB_MATCHES = "DAILY_JOB_MATCHES",
+  SWIPE_THRESHOLD = "SWIPE_THRESHOLD",
+  SWIPE_LIMIT_REACHED = "SWIPE_LIMIT_REACHED",
+  JOB_LIMIT_WARNING = "JOB_LIMIT_WARNING",
+  JOB_LIMIT_REACHED = "JOB_LIMIT_REACHED",
+  PLAN_EXPIRING_30D = "PLAN_EXPIRING_30D",
+  PLAN_EXPIRING_14D = "PLAN_EXPIRING_14D",
+  PLAN_EXPIRING_7D = "PLAN_EXPIRING_7D",
 }
 
 export enum NotificationStatus {
@@ -51,13 +56,13 @@ const NotificationSchema = new Schema<INotification>(
       maxlength: 1000,
     },
     data: {
-      type: Map,
-      of: String,
+      type: Schema.Types.Mixed,
+      default: undefined,
     },
     type: {
       type: String,
       enum: Object.values(NotificationType),
-      default: NotificationType.SYSTEM,
+      required: true,
     },
     status: {
       type: String,
@@ -82,6 +87,7 @@ const NotificationSchema = new Schema<INotification>(
 NotificationSchema.index({ userId: 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, status: 1 });
 NotificationSchema.index({ status: 1, createdAt: 1 });
+NotificationSchema.index({ userId: 1, type: 1, createdAt: -1 });
 
 export const Notification = mongoose.model<INotification>(
   "Notification",

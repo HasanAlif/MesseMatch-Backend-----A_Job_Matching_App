@@ -7,7 +7,12 @@ import {
   NotificationType,
   INotification,
 } from "./notification.model";
-import { User, FCM_TOKEN_CONFIG, DevicePlatform } from "../../models";
+import {
+  User,
+  FCM_TOKEN_CONFIG,
+  DevicePlatform,
+  IFcmTokenEntry,
+} from "../../models";
 import ApiError from "../../../errors/ApiErrors";
 import { getMessaging, isFirebaseInitialized } from "../../../shared/firebase";
 
@@ -28,26 +33,16 @@ interface SendNotificationPayload {
   title: string;
   body: string;
   data?: Record<string, string>;
-  type?: NotificationType;
+  type: NotificationType;
 }
 
 interface SendToUserPayload extends SendNotificationPayload {
   userId: string;
 }
 
-interface SendToMultiplePayload extends SendNotificationPayload {
-  userIds: string[];
-}
-
-interface BatchResult {
-  successCount: number;
-  failureCount: number;
-  results: Array<{
-    userId: string;
-    success: boolean;
-    messageId?: string;
-    error?: string;
-  }>;
+export interface PreloadedNotificationUser {
+  _id: mongoose.Types.ObjectId | string;
+  fcmTokens?: IFcmTokenEntry[];
 }
 
 const PERMANENT_TOKEN_ERRORS = [
@@ -157,52 +152,30 @@ const getActiveTokens = (
     .map((t) => t.token);
 };
 
-const sendToUser = async (
+const markNotificationStatus = async (
+  notificationId: mongoose.Types.ObjectId | string,
+  patch: Record<string, unknown>,
+): Promise<INotification | null> => {
+  return Notification.findByIdAndUpdate(notificationId, patch, {
+    new: true,
+  });
+};
+
+const deliverNotification = async (
+  user: PreloadedNotificationUser,
+  notification: INotification,
   payload: SendToUserPayload,
 ): Promise<INotification> => {
-  const { userId, title, body, data, type = NotificationType.SYSTEM } = payload;
-
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
-  }
-
-  const notification = await Notification.create({
-    userId: new mongoose.Types.ObjectId(userId),
-    title,
-    body,
-    data,
-    type,
-    status: NotificationStatus.PENDING,
-  });
-
-  if (!isFirebaseInitialized()) {
-    await Notification.findByIdAndUpdate(notification._id, {
-      status: NotificationStatus.FAILED,
-      errorMessage: "Firebase not initialized",
-    });
-    throw new ApiError(
-      httpStatus.SERVICE_UNAVAILABLE,
-      "Push notification service unavailable",
-    );
-  }
-
-  const user = await User.findById(userId).lean();
-  if (!user) {
-    await Notification.findByIdAndUpdate(notification._id, {
-      status: NotificationStatus.FAILED,
-      errorMessage: "User not found",
-    });
-    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
-  }
-
+  const { title, body, data } = payload;
+  const userIdStr = user._id.toString();
   const activeTokens = getActiveTokens(user.fcmTokens);
 
   if (activeTokens.length === 0) {
-    await Notification.findByIdAndUpdate(notification._id, {
+    const updated = await markNotificationStatus(notification._id, {
       status: NotificationStatus.FAILED,
       errorMessage: "No active FCM tokens registered",
     });
-    return notification;
+    return updated ?? notification;
   }
 
   try {
@@ -236,204 +209,121 @@ const sendToUser = async (
     });
 
     if (invalidTokens.length > 0) {
-      await User.findByIdAndUpdate(userId, {
-        $pull: { fcmTokens: { token: { $in: invalidTokens } } },
-      });
+      User.updateOne(
+        { _id: user._id },
+        { $pull: { fcmTokens: { token: { $in: invalidTokens } } } },
+      ).catch((err) =>
+        console.error(
+          `[notify] Failed to prune invalid tokens for user ${userIdStr}:`,
+          (err as Error).message,
+        ),
+      );
     }
 
-    if (response.successCount > 0) {
-      await Notification.findByIdAndUpdate(notification._id, {
-        status: NotificationStatus.SENT,
-        fcmMessageId: `sent_to_${response.successCount}_devices`,
-      });
-    } else {
-      await Notification.findByIdAndUpdate(notification._id, {
-        status: NotificationStatus.FAILED,
-        errorMessage: `All ${response.failureCount} devices failed`,
-      });
-    }
+    const finalPatch =
+      response.successCount > 0
+        ? {
+            status: NotificationStatus.SENT,
+            fcmMessageId: `sent_to_${response.successCount}_devices`,
+          }
+        : {
+            status: NotificationStatus.FAILED,
+            errorMessage: `All ${response.failureCount} devices failed`,
+          };
 
-    return (await Notification.findById(notification._id)) as INotification;
+    const updated = await markNotificationStatus(notification._id, finalPatch);
+    return updated ?? notification;
   } catch (error: unknown) {
     const err = error as { message?: string };
-    const errorMessage = err?.message || "Unknown error";
+    const errorMessage = (err?.message || "Unknown error").substring(0, 500);
 
-    await Notification.findByIdAndUpdate(notification._id, {
+    const updated = await markNotificationStatus(notification._id, {
       status: NotificationStatus.FAILED,
-      errorMessage: errorMessage.substring(0, 500),
+      errorMessage,
     });
 
-    console.error(`FCM send error for user ${userId}:`, errorMessage);
-    return (await Notification.findById(notification._id)) as INotification;
+    console.error(`FCM send error for user ${userIdStr}:`, errorMessage);
+    return updated ?? notification;
   }
 };
 
-const sendToMultipleUsers = async (
-  payload: SendToMultiplePayload,
-): Promise<BatchResult> => {
-  const {
-    userIds,
-    title,
-    body,
-    data,
-    type = NotificationType.SYSTEM,
-  } = payload;
-
-  if (!Array.isArray(userIds) || userIds.length === 0) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "User IDs array is required");
-  }
-
-  if (userIds.length > 500) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      "Cannot send to more than 500 users at once",
-    );
-  }
-
-  const validUserIds = userIds.filter((id) =>
-    mongoose.Types.ObjectId.isValid(id),
-  );
-  if (validUserIds.length === 0) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "No valid user IDs provided");
-  }
-
-  const users = await User.find({
-    _id: { $in: validUserIds.map((id) => new mongoose.Types.ObjectId(id)) },
-  }).lean();
-
-  const tokenToUserId = new Map<string, string>();
-  const usersWithActiveTokens: string[] = [];
-  const usersWithoutTokens: string[] = [];
-
-  users.forEach((user) => {
-    const activeTokens = getActiveTokens(user.fcmTokens);
-    if (activeTokens.length > 0) {
-      usersWithActiveTokens.push(user._id.toString());
-      activeTokens.forEach((token) => {
-        tokenToUserId.set(token, user._id.toString());
-      });
-    } else {
-      usersWithoutTokens.push(user._id.toString());
-    }
-  });
-
-  const notificationDocs = validUserIds.map((userId) => ({
+const createPendingNotification = async (
+  userId: string,
+  payload: SendToUserPayload,
+): Promise<INotification> => {
+  const { title, body, data, type } = payload;
+  return Notification.create({
     userId: new mongoose.Types.ObjectId(userId),
     title,
     body,
     data,
     type,
-    status: usersWithActiveTokens.includes(userId)
-      ? NotificationStatus.PENDING
-      : NotificationStatus.FAILED,
-    errorMessage: !usersWithActiveTokens.includes(userId)
-      ? "No active FCM tokens registered"
-      : undefined,
-  }));
+    status: NotificationStatus.PENDING,
+  });
+};
 
-  const notifications = await Notification.insertMany(notificationDocs);
-  const results: BatchResult["results"] = [];
+const sendToUser = async (
+  payload: SendToUserPayload,
+): Promise<INotification> => {
+  const { userId } = payload;
 
-  usersWithoutTokens.forEach((userId) => {
-    results.push({
-      userId,
-      success: false,
-      error: "No active FCM tokens registered",
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
+  }
+
+  const notification = await createPendingNotification(userId, payload);
+
+  if (!isFirebaseInitialized()) {
+    const updated = await markNotificationStatus(notification._id, {
+      status: NotificationStatus.FAILED,
+      errorMessage: "Firebase not initialized",
     });
-  });
-
-  if (tokenToUserId.size === 0 || !isFirebaseInitialized()) {
-    return {
-      successCount: 0,
-      failureCount: validUserIds.length,
-      results,
-    };
-  }
-
-  const allTokens = Array.from(tokenToUserId.keys());
-  const userSuccessMap = new Map<string, boolean>();
-  usersWithActiveTokens.forEach((userId) => userSuccessMap.set(userId, false));
-
-  const invalidTokens: string[] = [];
-
-  for (let i = 0; i < allTokens.length; i += 500) {
-    const batchTokens = allTokens.slice(i, i + 500);
-
-    const multicastMessage: MulticastMessage = {
-      tokens: batchTokens,
-      notification: { title, body },
-      data: data || {},
-      android: {
-        priority: "high",
-        notification: { sound: "default", channelId: "default" },
-      },
-      apns: {
-        payload: { aps: { sound: "default" } },
-      },
-    };
-
-    try {
-      const messaging = getMessaging();
-      const response = await messaging.sendEachForMulticast(multicastMessage);
-
-      response.responses.forEach((resp, index) => {
-        const token = batchTokens[index];
-        const userId = tokenToUserId.get(token);
-
-        if (!userId) return;
-
-        if (resp.success) {
-          userSuccessMap.set(userId, true);
-        } else {
-          const errorCode = resp.error?.code;
-          if (errorCode && PERMANENT_TOKEN_ERRORS.includes(errorCode)) {
-            invalidTokens.push(token);
-          }
-        }
-      });
-    } catch (error: unknown) {
-      const err = error as { message?: string };
-      console.error("Multicast batch error:", err?.message);
-    }
-  }
-
-  let successCount = 0;
-  let failureCount = usersWithoutTokens.length;
-
-  usersWithActiveTokens.forEach((userId) => {
-    const succeeded = userSuccessMap.get(userId) ?? false;
-    const notification = notifications.find(
-      (n) => n.userId.toString() === userId,
+    throw new ApiError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      "Push notification service unavailable",
     );
-
-    if (succeeded) {
-      successCount++;
-      results.push({ userId, success: true });
-      if (notification) {
-        Notification.findByIdAndUpdate(notification._id, {
-          status: NotificationStatus.SENT,
-        }).exec();
-      }
-    } else {
-      failureCount++;
-      results.push({ userId, success: false, error: "All devices failed" });
-      if (notification) {
-        Notification.findByIdAndUpdate(notification._id, {
-          status: NotificationStatus.FAILED,
-          errorMessage: "All devices failed",
-        }).exec();
-      }
-    }
-  });
-
-  if (invalidTokens.length > 0) {
-    User.updateMany(
-      { "fcmTokens.token": { $in: invalidTokens } },
-      { $pull: { fcmTokens: { token: { $in: invalidTokens } } } },
-    ).exec();
   }
 
-  return { successCount, failureCount, results };
+  const user = await User.findById(userId)
+    .select("_id fcmTokens")
+    .lean<PreloadedNotificationUser>();
+  if (!user) {
+    await markNotificationStatus(notification._id, {
+      status: NotificationStatus.FAILED,
+      errorMessage: "User not found",
+    });
+    throw new ApiError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  return deliverNotification(user, notification, payload);
+};
+
+const sendToUserWithDocument = async (
+  user: PreloadedNotificationUser,
+  payload: SendToUserPayload,
+): Promise<INotification> => {
+  const userId = user._id.toString();
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
+  }
+
+  const notification = await createPendingNotification(userId, {
+    ...payload,
+    userId,
+  });
+
+  if (!isFirebaseInitialized()) {
+    await markNotificationStatus(notification._id, {
+      status: NotificationStatus.FAILED,
+      errorMessage: "Firebase not initialized",
+    });
+    throw new ApiError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      "Push notification service unavailable",
+    );
+  }
+
+  return deliverNotification(user, notification, { ...payload, userId });
 };
 
 const getUserNotifications = async (
@@ -558,7 +448,7 @@ export const notificationService = {
   registerFcmToken,
   removeFcmToken,
   sendToUser,
-  sendToMultipleUsers,
+  sendToUserWithDocument,
   getUserNotifications,
   markAsRead,
   markAllAsRead,

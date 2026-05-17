@@ -6,6 +6,10 @@ import { JobRequest, JobRequestStatus } from "../job/jobRequest.model";
 import ApiError from "../../../errors/ApiErrors";
 import haversineDistance from "../../../utils/HeversineDistance";
 import { MATCHING_CONFIG } from "./matching.constants";
+import {
+  notifyJobRequestAccepted,
+  notifyRatingReceived,
+} from "./matching.notifications";
 
 interface FitterMatchingJob {
   jobId: string;
@@ -384,6 +388,67 @@ const formatProjectPeriod = (
 
 const roundToTwo = (value: number): number => Number(value.toFixed(2));
 
+interface ScoringFitter {
+  skills?: string[];
+  spokenLanguages?: string[];
+  lattitude?: number;
+  longitude?: number;
+}
+
+interface ScoringJob {
+  requieredSkills?: string[];
+  requiredLanguages?: string[];
+}
+
+interface ScoringCompany {
+  lattitude?: number;
+  longitude?: number;
+}
+
+export const computeMatchScore = (
+  fitter: ScoringFitter,
+  job: ScoringJob,
+  company: ScoringCompany,
+): { matchScore: number; distanceKm?: number } => {
+  const fitterSkills = normalizeTextArray(fitter.skills);
+  const fitterLanguages = normalizeTextArray(fitter.spokenLanguages);
+  const requiredSkills = normalizeTextArray(job.requieredSkills);
+  const requiredLanguages = normalizeTextArray(job.requiredLanguages);
+
+  const skillsScore = calculateOverlapScore(fitterSkills, requiredSkills);
+  const languageScore = calculateOverlapScore(
+    fitterLanguages,
+    requiredLanguages,
+  );
+
+  const hasCoordinates =
+    typeof fitter.lattitude === "number" &&
+    typeof fitter.longitude === "number" &&
+    typeof company.lattitude === "number" &&
+    typeof company.longitude === "number";
+
+  const distanceKm = hasCoordinates
+    ? haversineDistance(
+        fitter.lattitude as number,
+        fitter.longitude as number,
+        company.lattitude as number,
+        company.longitude as number,
+      )
+    : undefined;
+
+  const distanceScore = calculateDistanceScore(distanceKm);
+
+  const finalScore =
+    skillsScore * MATCHING_CONFIG.WEIGHTS.skills +
+    languageScore * MATCHING_CONFIG.WEIGHTS.languages +
+    distanceScore * MATCHING_CONFIG.WEIGHTS.distance;
+
+  return {
+    matchScore: roundToTwo(finalScore),
+    distanceKm,
+  };
+};
+
 const calculateDaysBetween = (
   periodFrom?: Date,
   periodTo?: Date,
@@ -514,9 +579,6 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
     companies.map((company) => [company._id.toString(), company]),
   );
 
-  const fitterSkills = normalizeTextArray(fitter.skills);
-  const fitterLanguages = normalizeTextArray(fitter.spokenLanguages);
-
   const matchingJobs = jobs
     .reduce<FitterMatchingJob[]>((acc, job) => {
       const company = companyMap.get(job.createdBy.toString());
@@ -530,38 +592,11 @@ const matchingForFitter = async (userId: string): Promise<MatchingResponse> => {
         return acc;
       }
 
-      const requiredSkills = normalizeTextArray(job.requieredSkills);
-      const requiredLanguages = normalizeTextArray(job.requiredLanguages);
-
-      const skillsScore = calculateOverlapScore(fitterSkills, requiredSkills);
-      const languageScore = calculateOverlapScore(
-        fitterLanguages,
-        requiredLanguages,
+      const { matchScore, distanceKm } = computeMatchScore(
+        fitter,
+        job,
+        company,
       );
-
-      const hasCoordinates =
-        typeof fitter.lattitude === "number" &&
-        typeof fitter.longitude === "number" &&
-        typeof company.lattitude === "number" &&
-        typeof company.longitude === "number";
-
-      const distanceKm = hasCoordinates
-        ? haversineDistance(
-            fitter.lattitude as number,
-            fitter.longitude as number,
-            company.lattitude as number,
-            company.longitude as number,
-          )
-        : undefined;
-
-      const distanceScore = calculateDistanceScore(distanceKm);
-
-      const finalScore =
-        skillsScore * MATCHING_CONFIG.WEIGHTS.skills +
-        languageScore * MATCHING_CONFIG.WEIGHTS.languages +
-        distanceScore * MATCHING_CONFIG.WEIGHTS.distance;
-
-      const matchScore = roundToTwo(finalScore);
 
       if (matchScore <= MATCHING_CONFIG.MINIMUM_SCORE_PERCENT) {
         return acc;
@@ -870,48 +905,18 @@ const matchingForCompany = async (
     return { matchingFitters: [] };
   }
 
-  const companySkills = Array.from(allRequiredSkills);
-  const companyLanguages = Array.from(allRequiredLanguages);
+  const aggregatedRequirements = {
+    requieredSkills: Array.from(allRequiredSkills),
+    requiredLanguages: Array.from(allRequiredLanguages),
+  };
 
   const matchingFitters = fitters
     .reduce<CompanyMatchingFitter[]>((acc, fitter) => {
-      const fitterSkills = normalizeTextArray(fitter.skills);
-      const fitterLanguages = normalizeTextArray(fitter.spokenLanguages);
-
-      // Calculate skill match score
-      const skillsScore = calculateOverlapScore(fitterSkills, companySkills);
-
-      // Calculate language match score
-      const languageScore = calculateOverlapScore(
-        fitterLanguages,
-        companyLanguages,
+      const { matchScore, distanceKm } = computeMatchScore(
+        fitter,
+        aggregatedRequirements,
+        company,
       );
-
-      // Calculate distance
-      const hasCoordinates =
-        typeof fitter.lattitude === "number" &&
-        typeof fitter.longitude === "number" &&
-        typeof company.lattitude === "number" &&
-        typeof company.longitude === "number";
-
-      const distanceKm = hasCoordinates
-        ? haversineDistance(
-            fitter.lattitude as number,
-            fitter.longitude as number,
-            company.lattitude as number,
-            company.longitude as number,
-          )
-        : undefined;
-
-      const distanceScore = calculateDistanceScore(distanceKm);
-
-      // Calculate final match score
-      const finalScore =
-        skillsScore * MATCHING_CONFIG.WEIGHTS.skills +
-        languageScore * MATCHING_CONFIG.WEIGHTS.languages +
-        distanceScore * MATCHING_CONFIG.WEIGHTS.distance;
-
-      const matchScore = roundToTwo(finalScore);
 
       if (matchScore <= MATCHING_CONFIG.MINIMUM_SCORE_PERCENT) {
         return acc;
@@ -1081,6 +1086,25 @@ const updateRequestStatusForCompany = async (
     existingRequest.rejectedAt = new Date();
   }
   const updatedRequest = await existingRequest.save();
+
+  if (payload.requestStatus === JobRequestStatus.ACCEPTED) {
+    const [job, company] = await Promise.all([
+      Job.findById(existingRequest.jobId)
+        .select("projectName")
+        .lean<{ projectName?: string }>(),
+      User.findById(companyObjectId)
+        .select("companyName")
+        .lean<{ companyName?: string }>(),
+    ]);
+
+    void notifyJobRequestAccepted(
+      existingRequest.fitterId.toString(),
+      job?.projectName ?? "your job",
+      company?.companyName ?? "The company",
+      existingRequest.jobId.toString(),
+      updatedRequest._id.toString(),
+    );
+  }
 
   return {
     requestId: updatedRequest._id.toString(),
@@ -1413,6 +1437,24 @@ const giveRatingAndReviewToFitterForCompletedJob = async (
       rating: newAverageRating,
     },
     { new: true },
+  );
+
+  const [job, company] = await Promise.all([
+    Job.findById(jobRequest.jobId)
+      .select("projectName")
+      .lean<{ projectName?: string }>(),
+    User.findById(companyObjectId)
+      .select("companyName")
+      .lean<{ companyName?: string }>(),
+  ]);
+
+  void notifyRatingReceived(
+    jobRequest.fitterId.toString(),
+    payload.rating,
+    company?.companyName ?? "A company",
+    job?.projectName ?? "a completed job",
+    jobRequest.jobId.toString(),
+    updatedJobRequest._id.toString(),
   );
 
   return {

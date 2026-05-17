@@ -46,19 +46,4 @@ router.patch(
 
 router.patch("/:id/read", auth(...roles), notificationController.markAsRead);
 
-// Admin-only endpoints
-router.post(
-  "/send",
-  auth(UserRole.ADMIN),
-  validateRequest(notificationValidation.sendToUserSchema),
-  notificationController.sendToUser,
-);
-
-router.post(
-  "/send-batch",
-  auth(UserRole.ADMIN),
-  validateRequest(notificationValidation.sendToMultipleSchema),
-  notificationController.sendToMultipleUsers,
-);
-
 export const notificationRoutes = router;

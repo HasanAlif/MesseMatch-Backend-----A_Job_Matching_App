@@ -131,44 +131,6 @@ const getUnreadCount = catchAsync(
   },
 );
 
-const sendToUser = catchAsync(async (req: Request, res: Response) => {
-  const { userId, title, body, data, type } = req.body;
-
-  const result = await notificationService.sendToUser({
-    userId,
-    title,
-    body,
-    data,
-    type,
-  });
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "Notification sent",
-    data: result,
-  });
-});
-
-const sendToMultipleUsers = catchAsync(async (req: Request, res: Response) => {
-  const { userIds, title, body, data, type } = req.body;
-
-  const result = await notificationService.sendToMultipleUsers({
-    userIds,
-    title,
-    body,
-    data,
-    type,
-  });
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: `Sent: ${result.successCount}, Failed: ${result.failureCount}`,
-    data: result,
-  });
-});
-
 export const notificationController = {
   registerFcmToken,
   removeFcmToken,
@@ -177,6 +139,4 @@ export const notificationController = {
   markAsRead,
   markAllAsRead,
   getUnreadCount,
-  sendToUser,
-  sendToMultipleUsers,
 };
