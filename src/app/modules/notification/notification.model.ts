@@ -28,6 +28,7 @@ export interface INotification extends Document {
   data?: Record<string, string>;
   type: NotificationType;
   status: NotificationStatus;
+  isRead: boolean;
   fcmMessageId?: string;
   errorMessage?: string;
   readAt?: Date;
@@ -69,6 +70,11 @@ const NotificationSchema = new Schema<INotification>(
       enum: Object.values(NotificationStatus),
       default: NotificationStatus.PENDING,
     },
+    isRead: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     fcmMessageId: {
       type: String,
     },
@@ -88,6 +94,7 @@ NotificationSchema.index({ userId: 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, status: 1 });
 NotificationSchema.index({ status: 1, createdAt: 1 });
 NotificationSchema.index({ userId: 1, type: 1, createdAt: -1 });
+NotificationSchema.index({ userId: 1, isRead: 1 });
 
 export const Notification = mongoose.model<INotification>(
   "Notification",

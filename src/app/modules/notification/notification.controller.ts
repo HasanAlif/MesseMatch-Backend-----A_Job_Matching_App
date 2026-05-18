@@ -85,37 +85,6 @@ const getMyNotifications = catchAsync(
   },
 );
 
-const markAsRead = catchAsync(
-  async (req: Request & { user?: JwtPayload }, res: Response) => {
-    const userId = req.user?.id as string;
-    const { id: notificationId } = req.params;
-
-    const result = await notificationService.markAsRead(userId, notificationId);
-
-    sendResponse(res, {
-      statusCode: httpStatus.OK,
-      success: true,
-      message: "Notification marked as read",
-      data: result,
-    });
-  },
-);
-
-const markAllAsRead = catchAsync(
-  async (req: Request & { user?: JwtPayload }, res: Response) => {
-    const userId = req.user?.id as string;
-
-    const count = await notificationService.markAllAsRead(userId);
-
-    sendResponse(res, {
-      statusCode: httpStatus.OK,
-      success: true,
-      message: `${count} notifications marked as read`,
-      data: { count },
-    });
-  },
-);
-
 const getUnreadCount = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const userId = req.user?.id as string;
@@ -136,7 +105,5 @@ export const notificationController = {
   removeFcmToken,
   getMyDevices,
   getMyNotifications,
-  markAsRead,
-  markAllAsRead,
   getUnreadCount,
 };

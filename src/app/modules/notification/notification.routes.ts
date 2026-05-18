@@ -38,12 +38,4 @@ router.get(
   notificationController.getUnreadCount,
 );
 
-router.patch(
-  "/mark-all-read",
-  auth(...roles),
-  notificationController.markAllAsRead,
-);
-
-router.patch("/:id/read", auth(...roles), notificationController.markAsRead);
-
 export const notificationRoutes = router;

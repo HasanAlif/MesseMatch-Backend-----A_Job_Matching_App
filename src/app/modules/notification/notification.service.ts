@@ -259,6 +259,7 @@ const createPendingNotification = async (
     data,
     type,
     status: NotificationStatus.PENDING,
+    isRead: false,
   });
 };
 
@@ -341,67 +342,40 @@ const getUserNotifications = async (
   }
 
   const skip = (page - 1) * limit;
+  const userIdObj = new mongoose.Types.ObjectId(userId);
 
   const [notifications, total] = await Promise.all([
-    Notification.find({ userId: new mongoose.Types.ObjectId(userId) })
+    Notification.find({ userId: userIdObj })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
-    Notification.countDocuments({
-      userId: new mongoose.Types.ObjectId(userId),
-    }),
+    Notification.countDocuments({ userId: userIdObj }),
   ]);
 
+  // Mark all unread notifications as read
+  const unreadIds = notifications.filter((n) => !n.isRead).map((n) => n._id);
+
+  if (unreadIds.length > 0) {
+    await Notification.updateMany(
+      { _id: { $in: unreadIds } },
+      { isRead: true, readAt: new Date() },
+    );
+  }
+
+  // Return updated notifications
+  const updatedNotifications = notifications.map((n) => ({
+    ...n,
+    isRead: true,
+    readAt: unreadIds.includes(n._id as any) ? new Date() : n.readAt,
+  }));
+
   return {
-    notifications: notifications as INotification[],
+    notifications: updatedNotifications as INotification[],
     total,
     page,
     totalPages: Math.ceil(total / limit),
   };
-};
-
-const markAsRead = async (
-  userId: string,
-  notificationId: string,
-): Promise<INotification> => {
-  if (
-    !mongoose.Types.ObjectId.isValid(userId) ||
-    !mongoose.Types.ObjectId.isValid(notificationId)
-  ) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid ID");
-  }
-
-  const notification = await Notification.findOneAndUpdate(
-    {
-      _id: new mongoose.Types.ObjectId(notificationId),
-      userId: new mongoose.Types.ObjectId(userId),
-    },
-    { status: NotificationStatus.READ, readAt: new Date() },
-    { new: true },
-  );
-
-  if (!notification) {
-    throw new ApiError(httpStatus.NOT_FOUND, "Notification not found");
-  }
-
-  return notification;
-};
-
-const markAllAsRead = async (userId: string): Promise<number> => {
-  if (!mongoose.Types.ObjectId.isValid(userId)) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid user ID");
-  }
-
-  const result = await Notification.updateMany(
-    {
-      userId: new mongoose.Types.ObjectId(userId),
-      status: { $ne: NotificationStatus.READ },
-    },
-    { status: NotificationStatus.READ, readAt: new Date() },
-  );
-
-  return result.modifiedCount;
 };
 
 const getUnreadCount = async (userId: string): Promise<number> => {
@@ -411,7 +385,7 @@ const getUnreadCount = async (userId: string): Promise<number> => {
 
   return Notification.countDocuments({
     userId: new mongoose.Types.ObjectId(userId),
-    status: { $in: [NotificationStatus.SENT, NotificationStatus.PENDING] },
+    isRead: false,
   });
 };
 
@@ -450,8 +424,6 @@ export const notificationService = {
   sendToUser,
   sendToUserWithDocument,
   getUserNotifications,
-  markAsRead,
-  markAllAsRead,
   getUnreadCount,
   getUserDevices,
 };
