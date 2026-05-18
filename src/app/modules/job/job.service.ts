@@ -193,6 +193,33 @@ const notifyJobLimitProgress = async (companyId: string): Promise<void> => {
   }
 };
 
+const getJobForUpdate = async (
+  jobId: string,
+  companyId: string,
+): Promise<IJob> => {
+  if (!mongoose.Types.ObjectId.isValid(jobId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid job ID");
+  }
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const job = await Job.findById(jobId);
+
+  if (!job) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Job not found");
+  }
+
+  if (job.createdBy.toString() !== companyId) {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "You are not authorized to update this job",
+    );
+  }
+
+  return job;
+};
+
 const updateJob = async (
   jobId: string,
   companyId: string,
@@ -401,6 +428,7 @@ const deleteJob = async (jobId: string, companyId: string): Promise<void> => {
 
 export const jobService = {
   createJob,
+  getJobForUpdate,
   updateJob,
   getJobsByCompany,
   deleteJob,

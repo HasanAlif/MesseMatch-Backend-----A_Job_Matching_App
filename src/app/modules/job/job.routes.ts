@@ -16,6 +16,10 @@ router.post(
   jobController.createJob,
 );
 
+router.get("/my-jobs", auth(UserRole.COMPANY), jobController.getMyJobs);
+
+router.get("/:id", auth(UserRole.COMPANY), jobController.getJobForUpdate);
+
 router.patch(
   "/:id",
   auth(UserRole.COMPANY),
@@ -23,8 +27,6 @@ router.patch(
   validateRequest(jobValidation.updateSchema),
   jobController.updateJob,
 );
-
-router.get("/my-jobs", auth(UserRole.COMPANY), jobController.getMyJobs);
 
 router.patch(
   "/:jobId/status",

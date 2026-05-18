@@ -25,6 +25,22 @@ const createJob = catchAsync(
   },
 );
 
+const getJobForUpdate = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+    const { id: jobId } = req.params;
+
+    const result = await jobService.getJobForUpdate(jobId, companyId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Job details retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 const updateJob = catchAsync(
   async (req: Request & { user?: JwtPayload }, res: Response) => {
     const { id: jobId } = req.params;
@@ -105,6 +121,7 @@ const changeJobStatus = catchAsync(
 
 export const jobController = {
   createJob,
+  getJobForUpdate,
   updateJob,
   getMyJobs,
   deleteJob,
