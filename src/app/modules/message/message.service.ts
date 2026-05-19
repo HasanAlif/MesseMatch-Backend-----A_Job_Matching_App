@@ -303,11 +303,11 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
 
       return {
         _id: user._id,
-        userName: user.userName,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        profilePicture: user.profilePicture,
+        userName: user.userName || null,
+        fullName: user.fullName || null,
+        profilePicture: user.profilePicture || null,
+        email: user.email || null,
+        role: user.role || null,
         isOnline: user.isOnline,
         lastSeen: user.lastSeen,
         unreadCount,
