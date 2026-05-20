@@ -1,8 +1,6 @@
 import jwt from "jsonwebtoken";
 import { Server, Socket } from "socket.io";
 import { User, UserRole } from "../app/models/User.model";
-import { Message } from "../app/models/Message.model";
-// import { cloudinary } from "../helpars/fileUploader"; // Removed unused import
 import config from "../config";
 import {
   ALLOWED_CHAT_PAIRS,
@@ -323,21 +321,13 @@ export const socketHandler = (io: Server) => {
       if (!senderId) return;
 
       try {
-        await Message.updateMany(
-          {
-            senderId,
-            receiverId: userId,
-            isSeen: false,
-          },
-          {
-            $set: { isSeen: true, seenAt: new Date() },
-          },
+        await messageService.markMessagesAsRead(
+          userId as string,
+          String(senderId),
         );
-
-        const senderRoom = String(senderId);
-        io.to(senderRoom).emit("messages_read", { userId });
         // Backward-compatible alias for existing clients listening to 'mark_read'
-        io.to(senderRoom).emit("mark_read", { userId });
+        // (service already emits the canonical 'messages_read' event)
+        io.to(String(senderId)).emit("mark_read", { userId });
       } catch {
         socket.emit("message_error", {
           error: "Failed to mark messages as read",
@@ -352,15 +342,18 @@ export const socketHandler = (io: Server) => {
 
     // Handle: Disconnect
     socket.on("disconnect", async () => {
-      setUserOffline(userId);
+      const isFullyOffline = setUserOffline(userId, socket.id);
 
-      await User.findByIdAndUpdate(userId, {
-        isOnline: false,
-        lastSeen: new Date(),
-      });
+      if (isFullyOffline) {
+        const lastSeen = new Date();
+        await User.findByIdAndUpdate(userId, {
+          isOnline: false,
+          lastSeen,
+        });
+        io.emit("user_offline", { userId, lastSeen });
+      }
 
       io.emit("online_users", getOnlineUserIds());
-      io.emit("user_offline", { userId, lastSeen: new Date() });
     });
   });
 };

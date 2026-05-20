@@ -1,4 +1,5 @@
 import httpStatus from "http-status";
+import { Types } from "mongoose";
 import { Message } from "../../models/Message.model";
 import { User, UserRole, UserStatus } from "../../models/User.model";
 import { cloudinary } from "../../../helpars/fileUploader";
@@ -49,7 +50,8 @@ const canUsersCommunicate = (role1: string, role2: string): boolean => {
 
 // Socket instance holders
 let ioInstance: any = null;
-const onlineUsers = new Map<string, string>();
+// Tracks every active socket per user so multi-device sessions stay correct.
+const onlineUsers = new Map<string, Set<string>>();
 const socketMessageIdempotencyCache = new Map<
   string,
   { expiresAt: number; message: any }
@@ -77,15 +79,34 @@ export const setIO = (io: any) => {
 export const getIO = () => ioInstance;
 
 export const getReceiverSocketId = (userId: string): string | undefined => {
-  return onlineUsers.get(userId);
+  const sockets = onlineUsers.get(userId);
+  return sockets ? sockets.values().next().value : undefined;
+};
+
+export const getReceiverSocketIds = (userId: string): string[] => {
+  const sockets = onlineUsers.get(userId);
+  return sockets ? Array.from(sockets) : [];
 };
 
 export const setUserOnline = (userId: string, socketId: string) => {
-  onlineUsers.set(userId, socketId);
+  let sockets = onlineUsers.get(userId);
+  if (!sockets) {
+    sockets = new Set<string>();
+    onlineUsers.set(userId, sockets);
+  }
+  sockets.add(socketId);
 };
 
-export const setUserOffline = (userId: string) => {
-  onlineUsers.delete(userId);
+/** Returns true when the user has no remaining connected sockets. */
+export const setUserOffline = (userId: string, socketId: string): boolean => {
+  const sockets = onlineUsers.get(userId);
+  if (!sockets) return true;
+  sockets.delete(socketId);
+  if (sockets.size === 0) {
+    onlineUsers.delete(userId);
+    return true;
+  }
+  return false;
 };
 
 export const getOnlineUserIds = (): string[] => {
@@ -140,50 +161,73 @@ const normalizeSocketBinary = (input: unknown): Buffer | null => {
   return null;
 };
 
+// Validate a buffer + mime against the shared mime / size limits.
+const validateBufferUpload = (
+  buffer: Buffer | null,
+  mimeType: string,
+  index: number,
+): void => {
+  if (!buffer || buffer.length === 0) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Invalid file data at index ${index}`,
+    );
+  }
+  if (!mimeType) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Missing mimeType for file at index ${index}`,
+    );
+  }
+  if (!MESSAGE_CONFIG.SOCKET_ALLOWED_IMAGE_MIME_TYPES.includes(mimeType)) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Unsupported file type at index ${index}`,
+    );
+  }
+  const maxSizeBytes = MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024;
+  if (buffer.length > maxSizeBytes) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `File ${index + 1} too large. Maximum size is ${MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB}MB`,
+    );
+  }
+};
+
 const normalizeSocketFiles = (
   rawFiles: SocketFileInput[],
 ): NormalizedSocketFile[] => {
   return rawFiles.map((file, index) => {
     const binarySource = file.data ?? file.buffer;
     const buffer = normalizeSocketBinary(binarySource);
-
-    if (!buffer || buffer.length === 0) {
-      throw new ApiError(
-        httpStatus.BAD_REQUEST,
-        `Invalid file data at index ${index}`,
-      );
-    }
-
     const mimeType = (file.mimeType || "").toLowerCase();
-    if (!mimeType) {
-      throw new ApiError(
-        httpStatus.BAD_REQUEST,
-        `Missing mimeType for file at index ${index}`,
-      );
-    }
 
-    if (!MESSAGE_CONFIG.SOCKET_ALLOWED_IMAGE_MIME_TYPES.includes(mimeType)) {
-      throw new ApiError(
-        httpStatus.BAD_REQUEST,
-        `Unsupported file type at index ${index}`,
-      );
-    }
-
-    const maxSizeBytes = MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024;
-    if (buffer.length > maxSizeBytes) {
-      throw new ApiError(
-        httpStatus.BAD_REQUEST,
-        `File ${index + 1} too large. Maximum size is ${MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB}MB`,
-      );
-    }
+    validateBufferUpload(buffer, mimeType, index);
 
     return {
       fileName: file.fileName || `socket_file_${Date.now()}_${index}`,
       mimeType,
-      size: buffer.length,
-      buffer,
+      size: buffer!.length,
+      buffer: buffer!,
     };
   });
+};
+
+// Parse "data:image/png;base64,XXXX" → { mimeType, buffer }. Returns null if not a data URI.
+const parseDataUri = (
+  uri: string,
+): { mimeType: string; buffer: Buffer } | null => {
+  const trimmed = uri.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex === -1) return null;
+  const header = trimmed.slice(5, commaIndex);
+  const semiIndex = header.indexOf(";");
+  const mimeType = (
+    semiIndex === -1 ? header : header.slice(0, semiIndex)
+  ).toLowerCase();
+  const buffer = Buffer.from(trimmed.slice(commaIndex + 1), "base64");
+  return { mimeType, buffer };
 };
 
 const uploadBufferToCloudinary = async (
@@ -250,6 +294,53 @@ const uploadFilesWithConcurrency = async (
   return results;
 };
 
+// Shared image input shape for the unified uploader.
+type RawImageInput =
+  | { kind: "buffer"; fileName: string; mimeType: string; buffer: Buffer }
+  | { kind: "url"; url: string };
+
+// Unified upload entry point used by REST and socket paths. URLs pass through;
+// buffer inputs are validated and uploaded concurrently to Cloudinary.
+const uploadMessageImages = async (
+  inputs: RawImageInput[],
+): Promise<string[]> => {
+  if (inputs.length === 0) return [];
+  if (inputs.length > MESSAGE_CONFIG.MAX_IMAGES) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Cannot send more than ${MESSAGE_CONFIG.MAX_IMAGES} images`,
+    );
+  }
+
+  const bufferFiles: NormalizedSocketFile[] = [];
+  const slots: Array<
+    { kind: "url"; url: string } | { kind: "buffer"; bufferIndex: number }
+  > = [];
+
+  inputs.forEach((input, i) => {
+    if (input.kind === "url") {
+      slots.push({ kind: "url", url: input.url });
+      return;
+    }
+    validateBufferUpload(input.buffer, input.mimeType, i);
+    bufferFiles.push({
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      size: input.buffer.length,
+      buffer: input.buffer,
+    });
+    slots.push({ kind: "buffer", bufferIndex: bufferFiles.length - 1 });
+  });
+
+  const uploaded = bufferFiles.length
+    ? await uploadFilesWithConcurrency(bufferFiles)
+    : [];
+
+  return slots.map((slot) =>
+    slot.kind === "url" ? slot.url : uploaded[slot.bufferIndex],
+  );
+};
+
 // Get users for sidebar (users with conversation history)
 const getUsersForSidebar = async (loggedInUserId: string) => {
   const currentUser = await User.findById(loggedInUserId).select("role");
@@ -292,30 +383,37 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
     "_id userName fullName email role profilePicture isOnline lastSeen",
   );
 
-  // Get unread message count for each user
-  const usersWithUnreadCount = await Promise.all(
-    filteredUsers.map(async (user) => {
-      const unreadCount = await Message.countDocuments({
-        senderId: user._id,
-        receiverId: loggedInUserId,
+  // Aggregate unread counts in a single query (groups by sender)
+  const userObjectIds = filteredUsers.map((u) => u._id);
+  const unreadAggregation = await Message.aggregate<{
+    _id: Types.ObjectId;
+    count: number;
+  }>([
+    {
+      $match: {
+        receiverId: new Types.ObjectId(loggedInUserId),
+        senderId: { $in: userObjectIds },
         isSeen: false,
-      });
+      },
+    },
+    { $group: { _id: "$senderId", count: { $sum: 1 } } },
+  ]);
 
-      return {
-        _id: user._id,
-        userName: user.userName || null,
-        fullName: user.fullName || null,
-        profilePicture: user.profilePicture || null,
-        email: user.email || null,
-        role: user.role || null,
-        isOnline: user.isOnline,
-        lastSeen: user.lastSeen,
-        unreadCount,
-      };
-    }),
+  const unreadByUser = new Map(
+    unreadAggregation.map((row) => [row._id.toString(), row.count]),
   );
 
-  return usersWithUnreadCount;
+  return filteredUsers.map((user) => ({
+    _id: user._id,
+    userName: user.userName || null,
+    fullName: user.fullName || null,
+    profilePicture: user.profilePicture || null,
+    email: user.email || null,
+    role: user.role || null,
+    isOnline: user.isOnline,
+    lastSeen: user.lastSeen,
+    unreadCount: unreadByUser.get(user._id.toString()) ?? 0,
+  }));
 };
 
 // Get messages between two users with pagination
@@ -455,96 +553,45 @@ const sendMessage = async (
     );
   }
 
-  // Handle image upload
+  // Handle image upload via the unified helper
   let imageUrls: string[] = [];
 
-  // Handle file uploads from form-data (REST API)
+  // REST API: multipart/form-data files
   if (files && files.length > 0) {
-    if (files.length > MESSAGE_CONFIG.MAX_IMAGES) {
-      throw new ApiError(
-        httpStatus.BAD_REQUEST,
-        `Cannot send more than ${MESSAGE_CONFIG.MAX_IMAGES} images`,
-      );
-    }
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const uploadResponse = await cloudinary.uploader.upload(
-          `data:${file.mimetype};base64,${file.buffer.toString("base64")}`,
-          {
-            folder: "message_images",
-            resource_type: "auto",
-            transformation: [
-              { width: 1000, height: 1000, crop: "limit" },
-              { quality: "auto:good" },
-              { format: "auto" },
-            ],
-          },
-        );
-        imageUrls.push(uploadResponse.secure_url);
-      } catch (cloudinaryError: any) {
-        throw new ApiError(
-          httpStatus.INTERNAL_SERVER_ERROR,
-          `${MESSAGE_ERRORS.UPLOAD_FAILED} ${i + 1}: ${cloudinaryError.message}`,
-        );
-      }
-    }
+    const inputs: RawImageInput[] = files.map((file, idx) => ({
+      kind: "buffer",
+      fileName: file.originalname || `rest_file_${Date.now()}_${idx}`,
+      mimeType: (file.mimetype || "").toLowerCase(),
+      buffer: file.buffer,
+    }));
+    imageUrls = await uploadMessageImages(inputs);
   }
-  // Handle base64 strings or URLs (Socket.IO)
+  // Legacy socket path: URL strings or data-URI base64 strings
   else if (image) {
-    const imagesToProcess = Array.isArray(image) ? image : [image];
+    const imagesToProcess = (Array.isArray(image) ? image : [image]).filter(
+      (s): s is string => typeof s === "string" && s.trim() !== "",
+    );
 
-    if (imagesToProcess.length > MESSAGE_CONFIG.MAX_IMAGES) {
-      throw new ApiError(
-        httpStatus.BAD_REQUEST,
-        `Cannot send more than ${MESSAGE_CONFIG.MAX_IMAGES} images`,
-      );
-    }
-
-    for (let i = 0; i < imagesToProcess.length; i++) {
-      const currentImage = imagesToProcess[i];
-
-      if (typeof currentImage !== "string" || currentImage.trim() === "") {
-        continue;
+    const inputs: RawImageInput[] = imagesToProcess.map((current, idx) => {
+      if (current.startsWith("http")) {
+        return { kind: "url", url: current };
       }
-
-      // Check size limit for base64
-      if (
-        !currentImage.startsWith("http") &&
-        currentImage.length > MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024
-      ) {
+      const parsed = parseDataUri(current);
+      if (!parsed) {
         throw new ApiError(
           httpStatus.BAD_REQUEST,
-          `Image ${i + 1} too large. Maximum size is ${MESSAGE_CONFIG.MAX_IMAGE_SIZE_MB}MB`,
+          `Image ${idx + 1} must be an http(s) URL or a data: URI`,
         );
       }
+      return {
+        kind: "buffer",
+        fileName: `socket_legacy_${Date.now()}_${idx}`,
+        mimeType: parsed.mimeType,
+        buffer: parsed.buffer,
+      };
+    });
 
-      if (currentImage.startsWith("http")) {
-        imageUrls.push(currentImage);
-      } else {
-        try {
-          const uploadResponse = await cloudinary.uploader.upload(
-            currentImage,
-            {
-              folder: "message_images",
-              resource_type: "auto",
-              transformation: [
-                { width: 1000, height: 1000, crop: "limit" },
-                { quality: "auto:good" },
-                { format: "auto" },
-              ],
-            },
-          );
-          imageUrls.push(uploadResponse.secure_url);
-        } catch (cloudinaryError: any) {
-          throw new ApiError(
-            httpStatus.INTERNAL_SERVER_ERROR,
-            `${MESSAGE_ERRORS.UPLOAD_FAILED} ${i + 1}: ${cloudinaryError.message}`,
-          );
-        }
-      }
-    }
+    imageUrls = await uploadMessageImages(inputs);
   }
 
   const newMessage = new Message({
