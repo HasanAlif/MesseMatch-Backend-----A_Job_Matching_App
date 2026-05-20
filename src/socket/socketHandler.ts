@@ -104,31 +104,42 @@ export const socketHandler = (io: Server) => {
       return;
     }
 
-    // Update user online status
-    await User.findByIdAndUpdate(userId, { isOnline: true });
-
-    // Track online user
+    // Track online user; emit delta + flip DB only on 0→1 socket transition
     socket.join(userId);
-    setUserOnline(userId, socket.id);
+    const wasOffline = setUserOnline(userId, socket.id);
 
-    // Broadcast online users
-    io.emit("online_users", getOnlineUserIds());
+    if (wasOffline) {
+      await User.findByIdAndUpdate(userId, { isOnline: true });
+      io.emit("user_online", { userId });
+    }
 
-    const socketActionTimestamps: number[] = [];
-    const isRateLimited = (maxEvents: number, windowMs: number) => {
+    // Per-event sliding-window rate limiter with O(1) amortized head advancement.
+    const eventBuckets = new Map<string, { times: number[]; head: number }>();
+    const isRateLimited = (
+      eventName: string,
+      maxEvents: number,
+      windowMs: number,
+    ) => {
+      let bucket = eventBuckets.get(eventName);
+      if (!bucket) {
+        bucket = { times: [], head: 0 };
+        eventBuckets.set(eventName, bucket);
+      }
       const now = Date.now();
       while (
-        socketActionTimestamps.length > 0 &&
-        now - socketActionTimestamps[0] > windowMs
+        bucket.head < bucket.times.length &&
+        now - bucket.times[bucket.head] > windowMs
       ) {
-        socketActionTimestamps.shift();
+        bucket.head += 1;
       }
-
-      if (socketActionTimestamps.length >= maxEvents) {
-        return true;
+      const active = bucket.times.length - bucket.head;
+      if (active >= maxEvents) return true;
+      bucket.times.push(now);
+      // Compact occasionally so the array doesn't grow without bound.
+      if (bucket.head > 64) {
+        bucket.times = bucket.times.slice(bucket.head);
+        bucket.head = 0;
       }
-
-      socketActionTimestamps.push(now);
       return false;
     };
 
@@ -179,7 +190,7 @@ export const socketHandler = (io: Server) => {
       const payload = parseSocketPayload(rawPayload, "send_message");
       if (!payload) return;
 
-      if (isRateLimited(20, 10_000)) {
+      if (isRateLimited("send_message", 20, 10_000)) {
         socket.emit("message_error", {
           error: "Too many requests. Please try again shortly.",
         });
@@ -233,7 +244,7 @@ export const socketHandler = (io: Server) => {
       const payload = parseSocketPayload(rawPayload, "send_message_files");
       if (!payload) return;
 
-      if (isRateLimited(12, 10_000)) {
+      if (isRateLimited("send_message_files", 12, 10_000)) {
         socket.emit("message_error", {
           error: "Too many upload requests. Please try again shortly.",
         });
@@ -352,8 +363,6 @@ export const socketHandler = (io: Server) => {
         });
         io.emit("user_offline", { userId, lastSeen });
       }
-
-      io.emit("online_users", getOnlineUserIds());
     });
   });
 };

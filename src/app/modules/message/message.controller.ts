@@ -30,7 +30,10 @@ const getMessages = catchAsync(async (req: Request, res: Response) => {
     statusCode: httpStatus.OK,
     success: true,
     message: MESSAGE_SUCCESS.RETRIEVED,
-    data: result.messages,
+    data: {
+      receiver: result.receiver,
+      messages: result.messages,
+    },
     meta: result.meta,
   });
 });

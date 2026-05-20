@@ -88,13 +88,16 @@ export const getReceiverSocketIds = (userId: string): string[] => {
   return sockets ? Array.from(sockets) : [];
 };
 
-export const setUserOnline = (userId: string, socketId: string) => {
+/** Returns true when this is the user's first connected socket (newly online). */
+export const setUserOnline = (userId: string, socketId: string): boolean => {
   let sockets = onlineUsers.get(userId);
+  const wasOffline = !sockets || sockets.size === 0;
   if (!sockets) {
     sockets = new Set<string>();
     onlineUsers.set(userId, sockets);
   }
   sockets.add(socketId);
+  return wasOffline;
 };
 
 /** Returns true when the user has no remaining connected sockets. */
@@ -230,10 +233,15 @@ const parseDataUri = (
   return { mimeType, buffer };
 };
 
+interface CloudinaryUploadResult {
+  url: string;
+  publicId: string;
+}
+
 const uploadBufferToCloudinary = async (
   file: NormalizedSocketFile,
   index: number,
-): Promise<string> => {
+): Promise<CloudinaryUploadResult> => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
@@ -256,7 +264,7 @@ const uploadBufferToCloudinary = async (
           return;
         }
 
-        resolve(result.secure_url);
+        resolve({ url: result.secure_url, publicId: result.public_id });
       },
     );
 
@@ -266,12 +274,12 @@ const uploadBufferToCloudinary = async (
 
 const uploadFilesWithConcurrency = async (
   files: NormalizedSocketFile[],
-): Promise<string[]> => {
+): Promise<CloudinaryUploadResult[]> => {
   const concurrency = Math.max(
     1,
     MESSAGE_CONFIG.SOCKET_FILE_UPLOAD_CONCURRENCY,
   );
-  const results: string[] = new Array(files.length);
+  const results: CloudinaryUploadResult[] = new Array(files.length);
   let cursor = 0;
 
   const worker = async () => {
@@ -299,11 +307,12 @@ type RawImageInput =
   | { kind: "buffer"; fileName: string; mimeType: string; buffer: Buffer }
   | { kind: "url"; url: string };
 
-// Unified upload entry point used by REST and socket paths. URLs pass through;
-// buffer inputs are validated and uploaded concurrently to Cloudinary.
+// Unified upload entry point used by REST and socket paths. URLs pass through
+// (no publicId, since we don't own those assets); buffer inputs are validated
+// and uploaded concurrently to Cloudinary.
 const uploadMessageImages = async (
   inputs: RawImageInput[],
-): Promise<string[]> => {
+): Promise<CloudinaryUploadResult[]> => {
   if (inputs.length === 0) return [];
   if (inputs.length > MESSAGE_CONFIG.MAX_IMAGES) {
     throw new ApiError(
@@ -337,7 +346,9 @@ const uploadMessageImages = async (
     : [];
 
   return slots.map((slot) =>
-    slot.kind === "url" ? slot.url : uploaded[slot.bufferIndex],
+    slot.kind === "url"
+      ? { url: slot.url, publicId: "" }
+      : uploaded[slot.bufferIndex],
   );
 };
 
@@ -353,54 +364,62 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
     return [];
   }
 
-  const messages = await Message.find({
-    $or: [{ senderId: loggedInUserId }, { receiverId: loggedInUserId }],
-  }).select("senderId receiverId");
+  // Single aggregation: derive distinct conversation partners and their unread counts.
+  const myObjectId = new Types.ObjectId(loggedInUserId);
+  const partners = await Message.aggregate<{
+    _id: Types.ObjectId;
+    unreadCount: number;
+  }>([
+    {
+      $match: {
+        $or: [{ senderId: myObjectId }, { receiverId: myObjectId }],
+      },
+    },
+    {
+      $project: {
+        partnerId: {
+          $cond: [
+            { $eq: ["$senderId", myObjectId] },
+            "$receiverId",
+            "$senderId",
+          ],
+        },
+        unreadFromPartner: {
+          $cond: [
+            {
+              $and: [
+                { $eq: ["$receiverId", myObjectId] },
+                { $eq: ["$isSeen", false] },
+              ],
+            },
+            1,
+            0,
+          ],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: "$partnerId",
+        unreadCount: { $sum: "$unreadFromPartner" },
+      },
+    },
+  ]);
 
-  const userIds = new Set<string>();
-  messages.forEach((message) => {
-    const senderId = message.senderId.toString();
-    const receiverId = message.receiverId.toString();
-    if (senderId !== loggedInUserId) {
-      userIds.add(senderId);
-    }
-    if (receiverId !== loggedInUserId) {
-      userIds.add(receiverId);
-    }
-  });
-
-  const userIdsArray = Array.from(userIds);
-  if (userIdsArray.length === 0) {
+  if (partners.length === 0) {
     return [];
   }
 
-  // Filter by allowed roles
+  const unreadByUser = new Map(
+    partners.map((row) => [row._id.toString(), row.unreadCount]),
+  );
+
   const filteredUsers = await User.find({
-    _id: { $in: userIdsArray },
+    _id: { $in: partners.map((p) => p._id) },
     role: { $in: allowedRoles },
     status: UserStatus.ACTIVE,
   }).select(
     "_id userName fullName email role profilePicture isOnline lastSeen",
-  );
-
-  // Aggregate unread counts in a single query (groups by sender)
-  const userObjectIds = filteredUsers.map((u) => u._id);
-  const unreadAggregation = await Message.aggregate<{
-    _id: Types.ObjectId;
-    count: number;
-  }>([
-    {
-      $match: {
-        receiverId: new Types.ObjectId(loggedInUserId),
-        senderId: { $in: userObjectIds },
-        isSeen: false,
-      },
-    },
-    { $group: { _id: "$senderId", count: { $sum: 1 } } },
-  ]);
-
-  const unreadByUser = new Map(
-    unreadAggregation.map((row) => [row._id.toString(), row.count]),
   );
 
   return filteredUsers.map((user) => ({
@@ -427,7 +446,9 @@ const getMessages = async (
   // Validate both users exist and get their roles
   const [currentUser, otherUser] = await Promise.all([
     User.findById(myId).select("role"),
-    User.findById(userToChatId).select("role status"),
+    User.findById(userToChatId).select(
+      "role status userName fullName profilePicture isOnline",
+    ),
   ]);
 
   if (!currentUser) {
@@ -485,7 +506,16 @@ const getMessages = async (
       .emit("messages_read", { userId: myId });
   }
 
+  const receiverData = {
+    _id: otherUser._id,
+    userName: otherUser.userName || null,
+    fullName: otherUser.fullName || null,
+    profilePicture: otherUser.profilePicture || null,
+    isOnline: otherUser.isOnline,
+  };
+
   return {
+    receiver: receiverData,
     messages,
     meta: {
       page,
@@ -513,11 +543,12 @@ const sendMessage = async (
     throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.SELF_MESSAGE);
   }
 
-  // Fetch both users with their roles
-  const [sender, receiver] = await Promise.all([
-    User.findById(senderId).select("_id role status"),
-    User.findById(receiverId).select("_id role status"),
-  ]);
+  // Fetch both users in a single query
+  const users = await User.find({
+    _id: { $in: [senderId, receiverId] },
+  }).select("_id role status");
+  const sender = users.find((u) => u._id.toString() === senderId);
+  const receiver = users.find((u) => u._id.toString() === receiverId);
 
   if (!sender) {
     throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.USER_NOT_FOUND);
@@ -554,7 +585,7 @@ const sendMessage = async (
   }
 
   // Handle image upload via the unified helper
-  let imageUrls: string[] = [];
+  let uploads: CloudinaryUploadResult[] = [];
 
   // REST API: multipart/form-data files
   if (files && files.length > 0) {
@@ -564,7 +595,7 @@ const sendMessage = async (
       mimeType: (file.mimetype || "").toLowerCase(),
       buffer: file.buffer,
     }));
-    imageUrls = await uploadMessageImages(inputs);
+    uploads = await uploadMessageImages(inputs);
   }
   // Legacy socket path: URL strings or data-URI base64 strings
   else if (image) {
@@ -591,14 +622,15 @@ const sendMessage = async (
       };
     });
 
-    imageUrls = await uploadMessageImages(inputs);
+    uploads = await uploadMessageImages(inputs);
   }
 
   const newMessage = new Message({
     senderId,
     receiverId,
     text: messageText,
-    image: imageUrls,
+    image: uploads.map((u) => u.url),
+    imagePublicIds: uploads.map((u) => u.publicId),
   });
 
   await newMessage.save();
@@ -661,10 +693,11 @@ const sendMessageWithSocketFiles = async (
     }
   }
 
-  const [sender, receiver] = await Promise.all([
-    User.findById(senderId).select("_id role status"),
-    User.findById(receiverId).select("_id role status"),
-  ]);
+  const users = await User.find({
+    _id: { $in: [senderId, receiverId] },
+  }).select("_id role status");
+  const sender = users.find((u) => u._id.toString() === senderId);
+  const receiver = users.find((u) => u._id.toString() === receiverId);
 
   if (!sender) {
     throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.USER_NOT_FOUND);
@@ -694,9 +727,9 @@ const sendMessageWithSocketFiles = async (
     );
   }
 
-  const imageUrls = await uploadFilesWithConcurrency(normalizedFiles);
+  const uploads = await uploadFilesWithConcurrency(normalizedFiles);
 
-  if (!messageText && imageUrls.length === 0) {
+  if (!messageText && uploads.length === 0) {
     throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
   }
 
@@ -704,7 +737,8 @@ const sendMessageWithSocketFiles = async (
     senderId,
     receiverId,
     text: messageText,
-    image: imageUrls,
+    image: uploads.map((u) => u.url),
+    imagePublicIds: uploads.map((u) => u.publicId),
   });
 
   await newMessage.save();
@@ -724,19 +758,25 @@ const sendMessageWithSocketFiles = async (
   return messageData;
 };
 
-// Get count of users with unread messages
+// Get count of distinct senders with unread messages for the given user.
 const getUnreadMessageCount = async (userId: string) => {
-  const unreadSenders = await Message.find({
-    receiverId: userId,
-    isSeen: false,
-  }).distinct("senderId");
+  const [result] = await Message.aggregate<{ n: number }>([
+    {
+      $match: {
+        receiverId: new Types.ObjectId(userId),
+        isSeen: false,
+      },
+    },
+    { $group: { _id: "$senderId" } },
+    { $count: "n" },
+  ]);
 
-  return { unreadCount: unreadSenders.length };
+  return { unreadCount: result?.n ?? 0 };
 };
 
-// Mark messages as read
+// Mark messages as read. Emits 'messages_read' only when rows actually changed.
 const markMessagesAsRead = async (userId: string, senderId: string) => {
-  await Message.updateMany(
+  const result = await Message.updateMany(
     {
       senderId: senderId,
       receiverId: userId,
@@ -747,7 +787,8 @@ const markMessagesAsRead = async (userId: string, senderId: string) => {
     },
   );
 
-  // Notify sender that messages were read (room emission)
+  if (result.modifiedCount === 0) return;
+
   if (ioInstance) {
     ioInstance.to(senderId.toString()).emit("messages_read", { userId });
   }

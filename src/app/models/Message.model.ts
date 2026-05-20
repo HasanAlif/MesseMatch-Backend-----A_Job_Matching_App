@@ -6,6 +6,7 @@ export interface IMessage extends Document {
   receiverId: Types.ObjectId;
   text: string;
   image: string[];
+  imagePublicIds: string[];
   isSeen: boolean;
   seenAt?: Date;
   createdAt: Date;
@@ -30,6 +31,10 @@ const MessageSchema = new Schema<IMessage>(
       maxlength: 5000,
     },
     image: {
+      type: [String],
+      default: [],
+    },
+    imagePublicIds: {
       type: [String],
       default: [],
     },
