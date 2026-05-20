@@ -24,7 +24,6 @@ export const MESSAGE_ERRORS = {
 export const MESSAGE_SUCCESS = {
   SENT: "Message sent successfully",
   RETRIEVED: "Messages retrieved successfully",
-  MARKED_READ: "Messages marked as read",
   USERS_RETRIEVED: "Users retrieved successfully",
   UNREAD_COUNT: "Unread message count retrieved successfully",
 };

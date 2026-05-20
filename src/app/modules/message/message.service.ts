@@ -11,7 +11,7 @@ import {
   MESSAGE_CONFIG,
 } from "./message.constants";
 
-// Validate chat permission between two roles
+// Validate chat permission between two roles. Throws ApiError if not allowed.
 const validateChatPermission = (
   senderRole: string,
   receiverRole: string,
@@ -48,9 +48,7 @@ const canUsersCommunicate = (role1: string, role2: string): boolean => {
   return allowed?.includes(role2) ?? false;
 };
 
-// Socket instance holders
 let ioInstance: any = null;
-// Tracks every active socket per user so multi-device sessions stay correct.
 const onlineUsers = new Map<string, Set<string>>();
 const socketMessageIdempotencyCache = new Map<
   string,
@@ -307,9 +305,6 @@ type RawImageInput =
   | { kind: "buffer"; fileName: string; mimeType: string; buffer: Buffer }
   | { kind: "url"; url: string };
 
-// Unified upload entry point used by REST and socket paths. URLs pass through
-// (no publicId, since we don't own those assets); buffer inputs are validated
-// and uploaded concurrently to Cloudinary.
 const uploadMessageImages = async (
   inputs: RawImageInput[],
 ): Promise<CloudinaryUploadResult[]> => {
@@ -364,11 +359,11 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
     return [];
   }
 
-  // Single aggregation: derive distinct conversation partners and their unread counts.
   const myObjectId = new Types.ObjectId(loggedInUserId);
   const partners = await Message.aggregate<{
     _id: Types.ObjectId;
     unreadCount: number;
+    lastMessageAt: Date;
   }>([
     {
       $match: {
@@ -377,6 +372,7 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
     },
     {
       $project: {
+        createdAt: 1,
         partnerId: {
           $cond: [
             { $eq: ["$senderId", myObjectId] },
@@ -402,19 +398,17 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
       $group: {
         _id: "$partnerId",
         unreadCount: { $sum: "$unreadFromPartner" },
+        lastMessageAt: { $max: "$createdAt" },
       },
     },
+    { $sort: { lastMessageAt: -1 } },
   ]);
 
   if (partners.length === 0) {
     return [];
   }
 
-  const unreadByUser = new Map(
-    partners.map((row) => [row._id.toString(), row.unreadCount]),
-  );
-
-  const filteredUsers = await User.find({
+  const allowedUsers = await User.find({
     _id: { $in: partners.map((p) => p._id) },
     role: { $in: allowedRoles },
     status: UserStatus.ACTIVE,
@@ -422,17 +416,26 @@ const getUsersForSidebar = async (loggedInUserId: string) => {
     "_id userName fullName email role profilePicture isOnline lastSeen",
   );
 
-  return filteredUsers.map((user) => ({
-    _id: user._id,
-    userName: user.userName || null,
-    fullName: user.fullName || null,
-    profilePicture: user.profilePicture || null,
-    email: user.email || null,
-    role: user.role || null,
-    isOnline: user.isOnline,
-    lastSeen: user.lastSeen,
-    unreadCount: unreadByUser.get(user._id.toString()) ?? 0,
-  }));
+  const userById = new Map(allowedUsers.map((u) => [u._id.toString(), u]));
+
+  return partners
+    .map((p) => {
+      const user = userById.get(p._id.toString());
+      if (!user) return null;
+      return {
+        _id: user._id,
+        userName: user.userName || null,
+        fullName: user.fullName || null,
+        profilePicture: user.profilePicture || null,
+        email: user.email || null,
+        role: user.role || null,
+        isOnline: user.isOnline,
+        lastSeen: user.lastSeen,
+        unreadCount: p.unreadCount,
+        lastMessageAt: p.lastMessageAt,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 };
 
 // Get messages between two users with pagination
@@ -526,208 +529,100 @@ const getMessages = async (
   };
 };
 
-// Send message with image upload support
 const sendMessage = async (
   senderId: string,
   receiverId: string,
   data: {
     text?: string;
+    files?: SocketFileInput[];
     image?: string | string[];
-    files?: Express.Multer.File[];
-  },
-) => {
-  const { text, image, files } = data;
-
-  // Prevent self-messaging
-  if (senderId === receiverId) {
-    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.SELF_MESSAGE);
-  }
-
-  // Fetch both users in a single query
-  const users = await User.find({
-    _id: { $in: [senderId, receiverId] },
-  }).select("_id role status");
-  const sender = users.find((u) => u._id.toString() === senderId);
-  const receiver = users.find((u) => u._id.toString() === receiverId);
-
-  if (!sender) {
-    throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.USER_NOT_FOUND);
-  }
-
-  if (!receiver) {
-    throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.RECEIVER_NOT_FOUND);
-  }
-
-  if (receiver.status !== UserStatus.ACTIVE) {
-    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.INACTIVE_USER);
-  }
-
-  // Validate role-based chat permission
-  validateChatPermission(sender.role, receiver.role);
-
-  // Validate that at least text or images are provided
-  if (
-    (!text || text.trim() === "") &&
-    !image &&
-    (!files || files.length === 0)
-  ) {
-    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
-  }
-
-  const messageText = text?.trim() || "";
-
-  // Validate text length
-  if (messageText.length > MESSAGE_CONFIG.MAX_TEXT_LENGTH) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      `Message text cannot exceed ${MESSAGE_CONFIG.MAX_TEXT_LENGTH} characters`,
-    );
-  }
-
-  // Handle image upload via the unified helper
-  let uploads: CloudinaryUploadResult[] = [];
-
-  // REST API: multipart/form-data files
-  if (files && files.length > 0) {
-    const inputs: RawImageInput[] = files.map((file, idx) => ({
-      kind: "buffer",
-      fileName: file.originalname || `rest_file_${Date.now()}_${idx}`,
-      mimeType: (file.mimetype || "").toLowerCase(),
-      buffer: file.buffer,
-    }));
-    uploads = await uploadMessageImages(inputs);
-  }
-  // Legacy socket path: URL strings or data-URI base64 strings
-  else if (image) {
-    const imagesToProcess = (Array.isArray(image) ? image : [image]).filter(
-      (s): s is string => typeof s === "string" && s.trim() !== "",
-    );
-
-    const inputs: RawImageInput[] = imagesToProcess.map((current, idx) => {
-      if (current.startsWith("http")) {
-        return { kind: "url", url: current };
-      }
-      const parsed = parseDataUri(current);
-      if (!parsed) {
-        throw new ApiError(
-          httpStatus.BAD_REQUEST,
-          `Image ${idx + 1} must be an http(s) URL or a data: URI`,
-        );
-      }
-      return {
-        kind: "buffer",
-        fileName: `socket_legacy_${Date.now()}_${idx}`,
-        mimeType: parsed.mimeType,
-        buffer: parsed.buffer,
-      };
-    });
-
-    uploads = await uploadMessageImages(inputs);
-  }
-
-  const newMessage = new Message({
-    senderId,
-    receiverId,
-    text: messageText,
-    image: uploads.map((u) => u.url),
-    imagePublicIds: uploads.map((u) => u.publicId),
-  });
-
-  await newMessage.save();
-
-  // Convert to plain object to avoid Socket.io Mongoose document serialization issues
-  const messageData = newMessage.toObject();
-
-  // Emit to receiver via socket if online
-  if (ioInstance) {
-    ioInstance.to(receiverId.toString()).emit("receive_message", messageData);
-  }
-
-  return messageData; // Return the plain object, not the Mongoose document
-};
-
-const sendMessageWithSocketFiles = async (
-  senderId: string,
-  receiverId: string,
-  data: {
-    text?: string;
-    files: SocketFileInput[];
     clientMessageId?: string;
   },
 ) => {
-  const { text, files, clientMessageId } = data;
+  const { text, files, image, clientMessageId } = data;
 
   if (senderId === receiverId) {
     throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.SELF_MESSAGE);
   }
 
-  if (!Array.isArray(files) || files.length === 0) {
-    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
-  }
-
-  if (files.length > MESSAGE_CONFIG.MAX_IMAGES) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      `Cannot send more than ${MESSAGE_CONFIG.MAX_IMAGES} images`,
-    );
-  }
-
-  const messageText = text?.trim() || "";
-  if (messageText.length > MESSAGE_CONFIG.MAX_TEXT_LENGTH) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      `Message text cannot exceed ${MESSAGE_CONFIG.MAX_TEXT_LENGTH} characters`,
-    );
-  }
-
+  // Idempotency: short-circuit if this client message was already processed.
   cleanupIdempotencyCache();
   const normalizedClientMessageId = clientMessageId?.trim();
   const idempotencyKey = normalizedClientMessageId
     ? `${senderId}:${normalizedClientMessageId}`
     : null;
-
   if (idempotencyKey) {
     const cached = socketMessageIdempotencyCache.get(idempotencyKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.message;
-    }
+    if (cached && cached.expiresAt > Date.now()) return cached.message;
+  }
+
+  const hasFiles = Array.isArray(files) && files.length > 0;
+  const hasImage = !!image;
+  const messageText = text?.trim() || "";
+
+  if (!messageText && !hasFiles && !hasImage) {
+    throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
+  }
+
+  if (messageText.length > MESSAGE_CONFIG.MAX_TEXT_LENGTH) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Message text cannot exceed ${MESSAGE_CONFIG.MAX_TEXT_LENGTH} characters`,
+    );
   }
 
   const users = await User.find({
     _id: { $in: [senderId, receiverId] },
-  }).select("_id role status");
+  }).select("_id role status userName fullName profilePicture isOnline");
   const sender = users.find((u) => u._id.toString() === senderId);
   const receiver = users.find((u) => u._id.toString() === receiverId);
 
   if (!sender) {
     throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.USER_NOT_FOUND);
   }
-
   if (!receiver) {
     throw new ApiError(httpStatus.NOT_FOUND, MESSAGE_ERRORS.RECEIVER_NOT_FOUND);
   }
-
   if (receiver.status !== UserStatus.ACTIVE) {
     throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.INACTIVE_USER);
   }
-
   validateChatPermission(sender.role, receiver.role);
 
-  const normalizedFiles = normalizeSocketFiles(files);
-  const totalSizeBytes = normalizedFiles.reduce(
-    (acc, file) => acc + file.size,
-    0,
-  );
-  const maxSocketTotalSizeBytes =
-    MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB * 1024 * 1024;
-  if (totalSizeBytes > maxSocketTotalSizeBytes) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      `Total file size cannot exceed ${MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB}MB`,
+  // Image upload — binary files take priority over legacy image strings.
+  let uploads: CloudinaryUploadResult[] = [];
+  if (hasFiles) {
+    const normalizedFiles = normalizeSocketFiles(files!);
+    const totalBytes = normalizedFiles.reduce((acc, f) => acc + f.size, 0);
+    const maxBytes = MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB * 1024 * 1024;
+    if (totalBytes > maxBytes) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        `Total file size cannot exceed ${MESSAGE_CONFIG.MAX_SOCKET_TOTAL_SIZE_MB}MB`,
+      );
+    }
+    uploads = await uploadFilesWithConcurrency(normalizedFiles);
+  } else if (hasImage) {
+    const list = (Array.isArray(image) ? image : [image!]).filter(
+      (s): s is string => typeof s === "string" && s.trim() !== "",
     );
+    const inputs: RawImageInput[] = list.map((current, i) => {
+      if (current.startsWith("http")) return { kind: "url", url: current };
+      const parsed = parseDataUri(current);
+      if (!parsed) {
+        throw new ApiError(
+          httpStatus.BAD_REQUEST,
+          `Image ${i + 1} must be an http(s) URL or a data: URI`,
+        );
+      }
+      return {
+        kind: "buffer",
+        fileName: `socket_legacy_${Date.now()}_${i}`,
+        mimeType: parsed.mimeType,
+        buffer: parsed.buffer,
+      };
+    });
+    uploads = await uploadMessageImages(inputs);
   }
-
-  const uploads = await uploadFilesWithConcurrency(normalizedFiles);
 
   if (!messageText && uploads.length === 0) {
     throw new ApiError(httpStatus.BAD_REQUEST, MESSAGE_ERRORS.EMPTY_MESSAGE);
@@ -740,9 +635,18 @@ const sendMessageWithSocketFiles = async (
     image: uploads.map((u) => u.url),
     imagePublicIds: uploads.map((u) => u.publicId),
   });
-
   await newMessage.save();
-  const messageData = newMessage.toObject();
+
+  const messageData = {
+    ...newMessage.toObject(),
+    sender: {
+      _id: sender._id,
+      userName: sender.userName || null,
+      fullName: sender.fullName || null,
+      profilePicture: sender.profilePicture || null,
+      isOnline: sender.isOnline,
+    },
+  };
 
   if (ioInstance) {
     ioInstance.to(receiverId.toString()).emit("receive_message", messageData);
@@ -798,7 +702,6 @@ export const messageService = {
   getUsersForSidebar,
   getMessages,
   sendMessage,
-  sendMessageWithSocketFiles,
   getUnreadMessageCount,
   markMessagesAsRead,
   validateChatPermission,

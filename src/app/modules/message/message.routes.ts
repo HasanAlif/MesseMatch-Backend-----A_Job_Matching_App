@@ -3,7 +3,6 @@ import auth from "../../middlewares/auth";
 import validateRequest from "../../middlewares/validateRequest";
 import { messageController } from "./message.controller";
 import { messageValidation } from "./message.validation";
-import { fileUploader } from "../../../helpars/fileUploader";
 import { UserRole } from "../../models/User.model";
 
 const router = express.Router();
@@ -28,17 +27,5 @@ router.get(
   validateRequest(messageValidation.getMessagesSchema),
   messageController.getMessages,
 );
-
-// Send message to a user (supports up to 5 images)
-router.post(
-  "/:id",
-  auth(...chatRoles),
-  fileUploader.upload.array("images", 5),
-  validateRequest(messageValidation.sendMessageSchema),
-  messageController.sendMessage,
-);
-
-// Mark messages as read
-router.patch("/:id/read", auth(...chatRoles), messageController.markAsRead);
 
 export const messageRoutes = router;

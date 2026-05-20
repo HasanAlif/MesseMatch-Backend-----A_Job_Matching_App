@@ -26,22 +26,6 @@ export const getMessagesSchema = z.object({
     .optional(),
 });
 
-export const sendMessageSchema = z.object({
-  params: z.object({
-    id: objectIdSchema,
-  }),
-  body: z.object({
-    text: z
-      .string()
-      .max(
-        MESSAGE_CONFIG.MAX_TEXT_LENGTH,
-        `Message text cannot exceed ${MESSAGE_CONFIG.MAX_TEXT_LENGTH} characters`,
-      )
-      .optional(),
-  }),
-});
-
 export const messageValidation = {
   getMessagesSchema,
-  sendMessageSchema,
 };

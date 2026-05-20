@@ -185,7 +185,7 @@ export const socketHandler = (io: Server) => {
       }
     });
 
-    // Handle: Send message
+    // Handle: Send message (text, legacy URL/data-URI image strings, or binary files)
     socket.on("send_message", async (rawPayload: any) => {
       const payload = parseSocketPayload(rawPayload, "send_message");
       if (!payload) return;
@@ -211,25 +211,12 @@ export const socketHandler = (io: Server) => {
           return;
         }
 
-        const normalizedReceiverId = String(receiverId);
+        const newMessageData = await messageService.sendMessage(
+          userId as string,
+          String(receiverId),
+          { text, image, files, clientMessageId },
+        );
 
-        let newMessageData: any;
-        if (Array.isArray(files) && files.length > 0) {
-          newMessageData = await messageService.sendMessageWithSocketFiles(
-            userId as string,
-            normalizedReceiverId,
-            { text, files, clientMessageId },
-          );
-        } else {
-          // We delegate to messageService.sendMessage to avoid duplicate logic
-          newMessageData = await messageService.sendMessage(
-            userId as string,
-            normalizedReceiverId,
-            { text, image },
-          );
-        }
-
-        // Confirm to sender
         socket.emit("message_sent", newMessageData);
       } catch (error: any) {
         socket.emit("message_error", {
@@ -278,7 +265,7 @@ export const socketHandler = (io: Server) => {
           return;
         }
 
-        const newMessageData = await messageService.sendMessageWithSocketFiles(
+        const newMessageData = await messageService.sendMessage(
           userId as string,
           String(receiverId),
           { text, files, clientMessageId },
