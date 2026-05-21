@@ -104,12 +104,18 @@ export const socketHandler = (io: Server) => {
       return;
     }
 
-    // Track online user; emit delta + flip DB only on 0→1 socket transition
     socket.join(userId);
     const wasOffline = setUserOnline(userId, socket.id);
 
     if (wasOffline) {
-      await User.findByIdAndUpdate(userId, { isOnline: true });
+      try {
+        await User.findByIdAndUpdate(userId, { isOnline: true });
+      } catch (err) {
+        console.error(
+          "Failed to mark user online in DB:",
+          (err as Error).message,
+        );
+      }
       io.emit("user_online", { userId });
     }
 
@@ -344,10 +350,17 @@ export const socketHandler = (io: Server) => {
 
       if (isFullyOffline) {
         const lastSeen = new Date();
-        await User.findByIdAndUpdate(userId, {
-          isOnline: false,
-          lastSeen,
-        });
+        try {
+          await User.findByIdAndUpdate(userId, {
+            isOnline: false,
+            lastSeen,
+          });
+        } catch (err) {
+          console.error(
+            "Failed to mark user offline in DB:",
+            (err as Error).message,
+          );
+        }
         io.emit("user_offline", { userId, lastSeen });
       }
     });
