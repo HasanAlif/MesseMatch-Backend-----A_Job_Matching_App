@@ -15,6 +15,7 @@ export const corsOptions = {
     "http://localhost:3000",
     "http://10.10.20.6:5173",
     "http://localhost:5173",
+    "https://robby-work-dashboard.vercel.app",
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"],
