@@ -238,7 +238,6 @@ const getFitterProfile = async (fitterId: string) => {
     skills: fitter.skills,
     spokenLanguages: fitter.spokenLanguages,
     driversLicense: fitter.driversLicense,
-
   };
 };
 
@@ -474,6 +473,25 @@ const updateUserLanguage = async (userId: string, language: string) => {
   };
 };
 
+const getCompanyLatLong = async (companyId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid company ID");
+  }
+
+  const company = await User.findById(companyId)
+    .select("lattitude longitude")
+    .lean();
+
+  if (!company) {
+    throw new ApiError(httpStatus.NOT_FOUND, "Company not found");
+  }
+
+  return {
+    latitude: company.lattitude,
+    longitude: company.longitude,
+  };
+};
+
 export const profileService = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -486,4 +504,5 @@ export const profileService = {
   getSkillsLanguagesAndLicensesForUpdate,
   updateSkillsLanguagesAndLicenses,
   updateUserLanguage,
+  getCompanyLatLong,
 };

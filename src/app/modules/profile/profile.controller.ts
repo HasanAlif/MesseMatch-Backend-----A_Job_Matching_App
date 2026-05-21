@@ -186,6 +186,21 @@ const updateUserLanguage = catchAsync(
   },
 );
 
+const getCompanyLatLong = catchAsync(
+  async (req: Request & { user?: JwtPayload }, res: Response) => {
+    const companyId = req.user?.id as string;
+
+    const result = await profileService.getCompanyLatLong(companyId);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Company latitude and longitude retrieved successfully",
+      data: result,
+    });
+  },
+);
+
 export const profileController = {
   updateCompanyProfile,
   getCompanyProfile,
@@ -198,4 +213,5 @@ export const profileController = {
   getSkillsLanguagesAndLicensesForUpdate,
   updateSkillsLanguagesAndLicenses,
   updateUserLanguage,
+  getCompanyLatLong,
 };

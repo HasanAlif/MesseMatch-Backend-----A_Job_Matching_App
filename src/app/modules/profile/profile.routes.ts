@@ -80,4 +80,10 @@ router.patch(
   profileController.updateUserLanguage,
 );
 
+router.get(
+  "/company/lat-long",
+  auth(UserRole.COMPANY),
+  profileController.getCompanyLatLong,
+);
+
 export const profileRoutes = router;
