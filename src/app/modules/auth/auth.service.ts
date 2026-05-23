@@ -338,6 +338,7 @@ const socialLogin = async (payload: {
       await User.findByIdAndUpdate(user._id, {
         googleId: providerId,
         authProvider: provider,
+        isVerified: true,
         profilePicture: user.profilePicture || profileImage,
       });
       user = await User.findById(user._id).lean();
@@ -354,6 +355,7 @@ const socialLogin = async (payload: {
       googleId: providerId,
       profilePicture: profileImage,
       authProvider: provider,
+      isVerified: true,
     });
     user = await User.findById(newUser._id).lean();
   }
@@ -372,15 +374,26 @@ const socialLogin = async (payload: {
     );
   }
 
+  // BULLETPROOF: Device registration with error isolation
+  let deviceRegistrationError: string | null = null;
   if (fcmToken && deviceId && deviceType) {
-    const deviceUUID = generateDeviceUUID(deviceId.trim());
-    await notificationService.registerFcmToken({
-      userId: user._id.toString(),
-      deviceId: deviceUUID,
-      fcmToken: fcmToken.trim(),
-      platform: deviceType,
-      deviceName: deviceName?.trim(),
-    });
+    try {
+      const deviceUUID = generateDeviceUUID(deviceId.trim());
+
+      await notificationService.registerFcmToken({
+        userId: user._id.toString(),
+        deviceId: deviceUUID,
+        fcmToken: fcmToken.trim(),
+        platform: deviceType,
+        deviceName: deviceName?.trim(),
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.warn(
+        `[AUTH] Device registration failed for user ${user._id} at social login: ${errorMsg}`,
+      );
+      deviceRegistrationError = `Device registration failed: ${errorMsg}`;
+    }
   }
 
   const accessToken = jwtHelpers.generateToken(
@@ -400,7 +413,12 @@ const socialLogin = async (payload: {
     ...userWithoutSensitive
   } = user as any;
 
-  return { token: accessToken, user: userWithoutSensitive };
+  return {
+    token: accessToken,
+    role: user.role ?? null,
+    user: userWithoutSensitive,
+    deviceRegistrationError,
+  };
 };
 
 export const authService = {

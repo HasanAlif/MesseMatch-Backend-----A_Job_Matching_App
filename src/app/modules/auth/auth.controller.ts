@@ -156,11 +156,23 @@ const socialLogin = catchAsync(async (req: Request, res: Response) => {
     path: "/",
   });
 
+  const responseData: any = {
+    token: result.token,
+    role: result.role,
+    user: result.user,
+  };
+
+  if (result.deviceRegistrationError) {
+    responseData.deviceError = result.deviceRegistrationError;
+  }
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Social login successful",
-    data: result,
+    message: result.deviceRegistrationError
+      ? "Login successful but device registration failed"
+      : "Login successful",
+    data: responseData,
   });
 });
 
