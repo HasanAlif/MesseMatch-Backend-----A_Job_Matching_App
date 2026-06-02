@@ -1,4 +1,8 @@
 node_modules
 dist
-.env
 google-services.json
+config.bat
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

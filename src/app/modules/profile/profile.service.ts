@@ -4,8 +4,6 @@ import ApiError from "../../../errors/ApiErrors";
 import httpStatus from "http-status";
 import { User, UserRole } from "../../models";
 import { fileUploader } from "../../../helpars/fileUploader";
-import e from "express";
-import { pl } from "zod/v4/locales";
 
 const getCompanyProfile = async (companyId: string) => {
   if (!mongoose.Types.ObjectId.isValid(companyId)) {

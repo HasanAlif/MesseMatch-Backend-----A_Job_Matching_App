@@ -11,7 +11,6 @@ import { generateDeviceUUID } from "../../../utils/generateDeviceUUID";
 import { fileUploader } from "../../../helpars/fileUploader";
 import { UserRole, DevicePlatform, Plan } from "../../models/User.model";
 import { notificationService } from "../notification/notification.service";
-import { pl } from "zod/v4/locales";
 
 // Create a new user - Registration with OTP verification
 const createUserIntoDb = async (payload: {
